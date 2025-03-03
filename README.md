@@ -1,5 +1,7 @@
 # ConceptMappR
 
+[![CICD](https://github.com/DeSciL/ConceptMappR/actions/workflows/docker-ci.yml/badge.svg)](https://github.com/DeSciL/ConceptMappR/actions/workflows/docker-ci.yml) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14938859.svg)](https://doi.org/10.5281/zenodo.14218066)
+
 ## Project Description
 
 **ConceptMappR** is a Shiny dashboard designed to help students and teachers draw, analyze, and compare concept maps. 
