@@ -398,11 +398,12 @@
                 	<li><strong>Please download the drawing regularly</strong> in case of unexpected crashes (e.g., connection dropouts). 
                 	     It is recommended to use the <strong>map structure (i.e. *.cxl file)</strong> which when reuploaded recreates the drawing including the formatting and positions.</li>
                 	<li><strong>Shortcuts</strong>: <i>'N'</i> to add nodes, <i>'E'</i> to add edges, <i>'double click'</i> on nodes / edges to edit, <i>'D'</i> to delete</li>
-                 </ul>"
+                 </ul>",
+        "errorMessage": "There was a problem processing the data."
     },
     "tabAnalyze": {
         "name": "Analyze",
-        "noData": "<h4>No data uploaded</h4>",
+        "noData": "<h4>No data available</h4>",
         "primaryMap": "Primary Map",
         "comparisonMap": "Comparison Map",
         "sliderCentrality": {
@@ -499,23 +500,18 @@
             "tooltip": "Density of your map(s) which is the number of actual edges divided by the total number of possible edges.
                         Values are between 0 and 1 (1 reflecting a map in which all nodes are connected to each other).
                         If multiple Primary Files were uploaded, the average density across all Primary Files is shown on the left, and the value of the Comparison File on the right."
-        }
+        },
+        "errorMessage": "There was a problem processing the data."
     },
     "sidebar": {
         "upload": {
             "title": "Data Upload",
             "buttonLabel": "Select file...",
             "placeholder": "No file selected",
-            "popUpNoFileTitle": "No Data",
-            "popUpNoFileMessage": "Please first select one or multiple Primary File(s) and wait until the upload is completed. Uploading a Comparison File is optional.",
-            "popUpNoFileButtonLabel": "Dismiss",
-            "popUpNoDrawingTitle": "No Drawing Available",
-            "popUpNoDrawingMessage": "Please switch to the 'Draw' tab once to initialize the drawing. Uploading a Comparison File is optional.",
-            "popUpNoDrawingButtonLabel": "Dismiss",
-            "popUpReadErrorTitle": "Error",
-            "popUpReadErrorMessage": "There was a problem reading the file: ",
-            "popUpReadErrorButtonLabel": "Dismiss",
-          	"fileDraw": {
+            "noDrawingMessage": "Please make sure that the drawing is not empty (e.g., switch to the 'Draw' tab once to initialize the drawing). Uploading a Comparison File is optional.",
+            "processingMessage": "Uploading and processing files... The 'Analyze' button is activated once all files have been processed.",
+            "errorMessage": "There was a problem reading the following file: ",
+            "fileDraw": {
                 "title": "File (Optional)",
                 "tooltip": "Upload a file containing a map structure (*.cxl), edge list or node list. See the Readme for more information."
             },
@@ -665,13 +661,14 @@
         "sheetFiles": "Files",
         "sheetNodes": "Nodes",
         "sheetEdges": "Edges"
-      }
+      },
+      "errorMessage": "There was a problem downloading the data. An empty file has been created."
     },
 	"footer": {
       "text": "<p>
                 Project Team: 
                 <a href='https://ethz.ch/de/utils/search.MjE4NTQx.html'>Christian Thurn</a> (ETH Zurich),
-                <a href='https://ifvll.ethz.ch/en/about-us/people/person-detail.MTg4NzA4.TGlzdC81NjMsOTk1OTk2MTQ0.html'>Simona Daguati</a> (ETH Zurich),
+                <a href='https://ethz.ch/de/utils/search.MTg4NzA4.html'>Simona Daguati</a> (ETH Zurich),
                 <a href='https://www.phsz.ch/person/bruno-ruetsche'>Bruno Rütsche</a> (PH Schwyz), 
                 <br>
                 Development: <a href='https://www.phsz.ch/person/bruno-ruetsche'>Bruno Rütsche (PH Schwyz)</a>, Funding: <a href='https://ethz.ch/en/the-eth-zurich/education/innovedum.html' target='_blank'>Innovedum (ETH Zurich)</a>

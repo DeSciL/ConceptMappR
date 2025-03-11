@@ -156,15 +156,16 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
     immediate = TRUE,
     ui = hidden(
       div(id = "divAnalyzeFiles", 
-          style = 'margin-top:50px',
-          actionButton('analyzeFilesButton', 
+          style = 'margin-top:35px',
+          actionButton('analyzeButton', 
                        lang$sidebar$upload$analyzeFiles$title),
       )
     )
   )
-  addTooltip(session, "analyzeFilesButton", 
+  addTooltip(session, "analyzeButton", 
              title = lang$sidebar$upload$analyzeFiles$tooltip, 
              options = list(delay = list(show=1000)))
+  disable("analyzeButton")                                                 # Disable button
   
   # divTitleDisplayOptions ----
   insertUI(
@@ -541,6 +542,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
     immediate = TRUE,
     ui = hidden(
       div(id ="divTitleResetDraw",
+          style="margin-top:10px;",
           formatTitle(lang$sidebar$resetDrawing$title)
       )
     )
@@ -674,6 +676,11 @@ visibilitySidebarUI <- function(input = NULL, rv = NULL) {
         show("divRandomSeedAnalyze")
       }
       
+      # Show sliderSelectEdges if there are common edges
+      if (length(input$sliderSelectEdges) > 1) {
+        show("divSliderSelectEdges")
+      }
+      
       # Show matching options when comparison data was uploaded.
       if (rv$comparisonData) {
         show("divTitleMatchingOptions")
@@ -714,8 +721,8 @@ insertBodyUI <- function(rv = NULL, lang = NULL) {
                        style="display:inline-block; width: 48%",
                        sliderTextInput("sliderCentrality1", 
                                        label = lang$tabAnalyze$sliderCentrality$title,
-                                       choices = 1:10, 
-                                       selected = c(1, 10), 
+                                       choices = 0:10, 
+                                       selected = c(0, 10), 
                                        width = "90%"))
                  ),
                  hidden(
@@ -723,8 +730,8 @@ insertBodyUI <- function(rv = NULL, lang = NULL) {
                        style="display:inline-block; width: 48%",
                        sliderTextInput("sliderEdges1", 
                                        label = lang$tabAnalyze$sliderEdge$title,
-                                       choices = 1:10, 
-                                       selected = c(1, 10), 
+                                       choices = 0:10, 
+                                       selected = c(0, 10), 
                                        width = "90%"))
                  ),
                  visNetworkOutput("plotMap1", height = "580px")
@@ -867,75 +874,79 @@ readFiles <- function(files) {
     filename <- basename(files)
   }
   
+  # Initialize dataAll
+  dataAll <- NULL
+  
   # Load files
   for (i in 1:length(datapath)) {
-    # Determine file extension
-    fileExt <- tail(str_split(datapath[i], "\\.")[[1]], 1)
-    
-    # Load file
-    # *.csv, *.tsv or *.txt
-    if (fileExt %in% c("csv", "tsv", "txt")) {
-      # Determine encoding
-      encoding <- guess_encoding(datapath[i])[[1, "encoding"]]
+    result <- tryCatch({
+      # Determine file extension
+      fileExt <- tail(str_split(datapath[i], "\\.")[[1]], 1)
       
-      # Read rows into a vector
-      v <- scan(file = datapath[i], what = character(),                        
-                sep = "\n", 
-                encoding = encoding)
+      # Load file
+      # *.csv, *.tsv or *.txt
+      if (fileExt %in% c("csv", "tsv", "txt")) {
+        # Determine encoding
+        encoding <- guess_encoding(datapath[i])[[1, "encoding"]]
+        
+        # Read rows into a vector
+        v <- scan(file = datapath[i], what = character(),                        
+                  sep = "\n", 
+                  encoding = encoding)
+        
+        # Determine delimiter (use the one that occurs most often)
+        sep <- data.frame(sep = c(",", ";", "\t"), 
+                          n = c(length(grep(",", v)), length(grep(";", v)), length(grep("\t", v)))) %>%
+          arrange(desc(n)) %>%
+          filter(row_number() == 1) %>%
+          pull(sep)
+        
+        # Read file
+        data <- read.csv(datapath[i], 
+                         sep = sep, 
+                         header = FALSE, 
+                         col.names = c("fromLabel", "label", "toLabel", "arrowheads"))
+        
+        
+      # *.xlsx
+      } else if (fileExt %in% c("xlsx")) {
+        data <- read_xlsx(datapath[i], 
+                          range = cell_cols("A:D"),
+                          col_names = c("fromLabel", "label", "toLabel", "arrowheads"))
+      # *.cxl
+      } else if (fileExt %in% c("cxl")) {
+        data <- readCXL(datapath[i])
+      }
+  
+      # Set default structure
+      data <- data %>%
+        restructureAndFillData()
+  
+      # Add filename
+      data$nodes <- data$nodes %>%
+        mutate(filename = !!filename[i]) %>%
+        select(filename, everything()) 
+      data$edges <- data$edges %>%
+        mutate(filename = !!filename[i]) %>%
+        select(filename, everything()) 
       
-      # Determine delimiter (use the one that occurs most often)
-      sep <- data.frame(sep = c(",", ";", "\t"), 
-                        n = c(length(grep(",", v)), length(grep(";", v)), length(grep("\t", v)))) %>%
-        arrange(desc(n)) %>%
-        filter(row_number() == 1) %>%
-        pull(sep)
-      
-      # Read file
-      data <- tryCatch(read.csv(datapath[i], 
-                                sep = sep, 
-                                header = FALSE, 
-                                col.names = c("fromLabel", "label", "toLabel", "arrowheads")),
-                        error = function(e) {return(filename[i])})
-      
-      
-    # *.xlsx
-    } else if (fileExt %in% c("xlsx")) {
-      data <- tryCatch(read_xlsx(datapath[i], 
-                                       range = cell_cols("A:D"),
-                                       col_names = c("fromLabel", "label", "toLabel", "arrowheads")),
-                      error = function(e) {return(filename[i])})
-    # *.cxl
-    } else if (fileExt %in% c("cxl")) {
-      data <- tryCatch(readCXL(datapath[i]),
-                       error = function(e) {return(filename[i])})
-    }
-    
-    # Return error message if there was an error
-    if (is.character(data)) {
-      return(data)
-    }
+      # Append
+      if (is.null(dataAll)) {
+        dataAll <- data
+      } else {
+        dataAll$nodes <- dataAll$nodes %>%
+          bind_rows(data$nodes)
+        
+        dataAll$edges <- dataAll$edges %>%
+          bind_rows(data$edges)
+      }
 
-    # Set default structure
-    data <- data %>%
-      restructureAndFillData()
-
-    # Add filename
-    data$nodes <- data$nodes %>%
-      mutate(filename = !!filename[i]) %>%
-      select(filename, everything()) 
-    data$edges <- data$edges %>%
-      mutate(filename = !!filename[i]) %>%
-      select(filename, everything()) 
+    }, error = function(e) {
+      filename[i]                                                               # Return the problematic filename
+    })
     
-    # Append
-    if (!exists("dataAll")) {
-      dataAll <- data
-    } else {
-      dataAll$nodes <- dataAll$nodes %>%
-        bind_rows(data$nodes)
-      
-      dataAll$edges <- dataAll$edges %>%
-        bind_rows(data$edges)
+    if(is.character(result)){
+      return(result)                                                            # Return the filename right away if error occurs
     }
   }
   
@@ -992,20 +1003,6 @@ readCXL <- function(file) {
                          label = xml_attr(tmp, "label")
   )
   
-  # Extract linking phrases
-  tmp <- xml_find_all(xml_child(xml_child(x, "map"), "linking-phrase-list"), "linking-phrase")
-  phrases <- data.frame(id = xml_attr(tmp, "id"), 
-                        label = xml_attr(tmp, "label")
-  )
-  
-  # Extract connections
-  # "Connections" link a "concept" and a "phrase", and both can act as sources or targets.
-  tmp <- xml_find_all(xml_child(xml_child(x, "map"), "connection-list"), "connection")
-  connections <- data.frame(id = xml_attr(tmp, "id"), 
-                            idFrom = xml_attr(tmp, "from-id"),
-                            idTo = xml_attr(tmp, "to-id"),
-                            isBidrectional = xml_attr(tmp, "isBidirectional"))
-  
   # Extract concept appearances
   tmp <- xml_find_all(xml_child(xml_child(x, "map"), "concept-appearance-list"), "concept-appearance")
   conceptAppearance <- data.frame(id = xml_attr(tmp, "id"), 
@@ -1029,145 +1026,172 @@ readCXL <- function(file) {
                                      rgb(color1, color2, color3, maxColorValue = 255))) %>%
     select(!color1:color3)
   
+  # Extract linking phrases
+  tmp <- xml_find_all(xml_child(xml_child(x, "map"), "linking-phrase-list"), "linking-phrase")
+  phrases <- data.frame(id = xml_attr(tmp, "id"), 
+                        label = xml_attr(tmp, "label")
+  )
+  
+  # Extract connections
+  # "Connections" link a "concept" and a "phrase", and both can act as sources or targets.
+  tmp <- xml_find_all(xml_child(xml_child(x, "map"), "connection-list"), "connection")
+  connections <- data.frame(id = xml_attr(tmp, "id"), 
+                            idFrom = xml_attr(tmp, "from-id"),
+                            idTo = xml_attr(tmp, "to-id"),
+                            isBidrectional = xml_attr(tmp, "isBidirectional"))
+
   # Extract connection appearances
   tmp <- xml_find_all(xml_child(xml_child(x, "map"), "connection-appearance-list"), "connection-appearance")
   connectionAppearance <- data.frame(id = xml_attr(tmp, "id"), 
                                      arrowhead = xml_attr(tmp, "arrowhead"),
                                      width = xml_attr(tmp, "thickness"),
-                                     color.color = xml_attr(tmp, "color")) %>%
-    separate_wider_delim(color.color, delim = ",", 
+                                     color.color = xml_attr(tmp, "color"))
+  if (nrow(connectionAppearance) > 0) {
+    connectionAppearance <- connectionAppearance %>%
+      separate_wider_delim(color.color, delim = ",", 
                          names = c("color1", "color2", "color3"), 
                          too_many = "drop", cols_remove = FALSE) %>%
-    mutate(width = as.numeric(width),
-           width = case_when(
-             any(width > 10) ~ rescale(width, lower = 1, upper = 10),
-             TRUE ~ width                                                       # Otherwise let the original value to remain
-           ),
-           width = as.integer(width)
-    ) %>%
-    rowwise() %>%
-    mutate(color.color = ifelse(is.na(color.color),
-                               NA,
-                               rgb(color1, color2, color3, maxColorValue = 255))) %>%
-    select(!color1:color3)
+      mutate(width = as.numeric(width),
+             width = case_when(
+               any(width > 10) ~ rescale(width, lower = 1, upper = 10),
+               TRUE ~ width                                                       # Otherwise let the original value to remain
+             ),
+             width = as.integer(width)
+      ) %>%
+      rowwise() %>%
+      mutate(color.color = ifelse(is.na(color.color),
+                                 NA,
+                                 rgb(color1, color2, color3, maxColorValue = 255))) %>%
+      select(!color1:color3)
+  }
   
   # --- Restructure edges ---
   # Convert data from the CmapTools format to a format required by igraph and visNetwork.
-  
-  # Merge with appearance settings
-  edges1 <- connections %>%
-    left_join(connectionAppearance)
-  
-  # Determine if the source is a node or a label
-  edges1 <- edges1 %>%
-    mutate(start = ifelse(idFrom %in% concepts$id, "node", "label"))
-  
-  # Dataframe where the source is a node
-  edges2 <- edges1 %>%
-    filter(start == "node") %>%
-    select(idFrom, idLink = idTo, everything())
-  
-  # Dataframe where the source is a label (i.e., the target is a node)
-  edges3 <- edges1 %>%
-    filter(start == "label")%>%
-    select(idLink = idFrom, idTo, everything())
-  
-  # Match the dataframes (one having the node as source, one having the node 
-  # as target) by the shared label
-  edges4 <- edges2 %>%
-    full_join(edges3, multiple = "all", by = "idLink") 
-  
-  # Deal with a special case
-  # In CmapTools, it is possible to have a connection such as 
-  # "A <- Label -> B" where the source is always the link. These now appear as 
-  # two rows with NA in idFrom. The following code combines these two rows 
-  # into one.
-  edges5 <- edges4 %>%     
-    filter(is.na(idFrom)) %>%
-    group_by(idLink) %>%
-    mutate(
-      # Move values within the first row (e.g. idTo -> idFrom, arrowhead.y -> arrowhead.x)
-      idFrom = ifelse(is.na(idFrom) & (row_number() == 1), idTo, idFrom),
-      arrowhead.x = ifelse(row_number() == 1, arrowhead.y, arrowhead.x),
-      
-      # Both isBidrectional.x and *.x are "true"
-      isBidrectional.x = ifelse(row_number() == 1, "true", isBidrectional.x),
-      isBidrectional.y = ifelse(row_number() == 1, "true", isBidrectional.y),
-      
-      # Move values from the second to the first row
-      idTo = ifelse((row_number() == 1), lead(idTo), idTo),
-      arrowhead.y = ifelse(row_number() == 1, lead(arrowhead.y), arrowhead.y)
-    ) %>%
-    filter(!is.na(idFrom))
-  
-  # Join
-  if (nrow(edges5) == 0) {
-    edges6 <- edges4
+  if (nrow(connections) > 0) {
+    # Merge with appearance settings
+    edges1 <- connections %>%
+      left_join(connectionAppearance)
+    
+    # Determine if the source is a node or a label
+    edges1 <- edges1 %>%
+      mutate(start = ifelse(idFrom %in% concepts$id, "node", "label"))
+    
+    # Dataframe where the source is a node
+    edges2 <- edges1 %>%
+      filter(start == "node") %>%
+      select(idFrom, idLink = idTo, everything())
+    
+    # Dataframe where the source is a label (i.e., the target is a node)
+    edges3 <- edges1 %>%
+      filter(start == "label")%>%
+      select(idLink = idFrom, idTo, everything())
+    
+    # Match the dataframes (one having the node as source, one having the node 
+    # as target) by the shared label
+    edges4 <- edges2 %>%
+      full_join(edges3, multiple = "all", by = "idLink") 
+    
+    # Deal with a special case
+    # In CmapTools, it is possible to have a connection such as 
+    # "A <- Label -> B" where the source is always the link. These now appear as 
+    # two rows with NA in idFrom. The following code combines these two rows 
+    # into one.
+    edges5 <- edges4 %>%     
+      filter(is.na(idFrom)) %>%
+      group_by(idLink) %>%
+      mutate(
+        # Move values within the first row (e.g. idTo -> idFrom, arrowhead.y -> arrowhead.x)
+        idFrom = ifelse(is.na(idFrom) & (row_number() == 1), idTo, idFrom),
+        arrowhead.x = ifelse(row_number() == 1, arrowhead.y, arrowhead.x),
+        
+        # Both isBidrectional.x and *.x are "true"
+        isBidrectional.x = ifelse(row_number() == 1, "true", isBidrectional.x),
+        isBidrectional.y = ifelse(row_number() == 1, "true", isBidrectional.y),
+        
+        # Move values from the second to the first row
+        idTo = ifelse((row_number() == 1), lead(idTo), idTo),
+        arrowhead.y = ifelse(row_number() == 1, lead(arrowhead.y), arrowhead.y)
+      ) %>%
+      filter(!is.na(idFrom))
+    
+    # Join
+    if (nrow(edges5) == 0) {
+      edges6 <- edges4
+    } else {
+      edges6 <- edges4 %>%     
+        filter(!is.na(idFrom)) %>%
+        bind_rows(edges5)
+    }
+    
+    # In CmapTools, arrow visibility and directionality are separate settings, i.e.,
+    # an arrow can have a direction without a visible arrowhead.
+    # The following code makes decisions about how the map is actually shown in CmapTools 
+    # and deals with the fact that "A - Label - B" is represented as two connections 
+    # in Cmaptools that can have different arrow visibility/directionality, which contrasts 
+    # with how it is represented in R/visNetwork.
+    # All combinations of visibility and directionality: 
+    #   expand.grid(arrowhead.x = c(FALSE, TRUE), arrowhead.y = c(FALSE, TRUE), isBidrectional.x = c(FALSE, TRUE), isBidrectional.y = c(FALSE, TRUE))
+    edges7 <- edges6 %>%
+      mutate(arrowhead.x = if_else(arrowhead.x == "no" | is.na(arrowhead.x), FALSE, TRUE),
+             arrowhead.y = if_else(arrowhead.y == "no" | is.na(arrowhead.y), FALSE, TRUE),
+             isBidrectional.x = if_else(is.na(isBidrectional.x), FALSE, TRUE),
+             isBidrectional.y = if_else(is.na(isBidrectional.y), FALSE, TRUE)
+      ) %>%
+      mutate(arrowheads = NA,
+             arrowheads = if_else((!arrowhead.x & !arrowhead.y & !isBidrectional.x & !isBidrectional.y), # FALSE FALSE FALSE FALSE
+                                  0, arrowheads, missing = arrowheads),
+             arrowheads = if_else((arrowhead.x & !arrowhead.y & !isBidrectional.x & !isBidrectional.y),  # TRUE FALSE FALSE FALSE
+                                  0, arrowheads, missing = arrowheads),
+             arrowheads = if_else((!arrowhead.x & arrowhead.y & !isBidrectional.x & !isBidrectional.y),  # FALSE TRUE FALSE FALSE 
+                                  1, arrowheads, missing = arrowheads),
+             arrowheads = if_else((arrowhead.x & arrowhead.y & !isBidrectional.x & !isBidrectional.y),   # TRUE TRUE FALSE FALSE
+                                  1, arrowheads, missing = arrowheads),
+             arrowheads = if_else((!arrowhead.x & !arrowhead.y & isBidrectional.x & !isBidrectional.y),  # FALSE FALSE TRUE FALSE
+                                  0, arrowheads, missing = arrowheads),
+             arrowheads = if_else((arrowhead.x & !arrowhead.y & isBidrectional.x & !isBidrectional.y),   # TRUE FALSE TRUE FALSE
+                                  0, arrowheads, missing = arrowheads),
+             arrowheads = if_else((!arrowhead.x & arrowhead.y & isBidrectional.x & !isBidrectional.y),   # FALSE TRUE TRUE FALSE
+                                  1, arrowheads, missing = arrowheads),
+             arrowheads = if_else((arrowhead.x & arrowhead.y & isBidrectional.x & !isBidrectional.y),    # TRUE TRUE TRUE FALSE
+                                  1, arrowheads, missing = arrowheads),
+             arrowheads = if_else((!arrowhead.x & !arrowhead.y & !isBidrectional.x & isBidrectional.y),  # FALSE FALSE FALSE TRUE
+                                  0, arrowheads, missing = arrowheads),
+             arrowheads = if_else((arrowhead.x & !arrowhead.y & !isBidrectional.x & isBidrectional.y),   # TRUE FALSE FALSE TRUE
+                                  0, arrowheads, missing = arrowheads),
+             arrowheads = if_else((!arrowhead.x & arrowhead.y & !isBidrectional.x & isBidrectional.y),   # FALSE TRUE FALSE TRUE
+                                  1, arrowheads, missing = arrowheads),
+             arrowheads = if_else((arrowhead.x & arrowhead.y & !isBidrectional.x & isBidrectional.y),    # TRUE TRUE FALSE TRUE
+                                  1, arrowheads, missing = arrowheads),
+             arrowheads = if_else((!arrowhead.x & !arrowhead.y & isBidrectional.x & isBidrectional.y),   # FALSE FALSE TRUE TRUE
+                                  0, arrowheads, missing = arrowheads),
+             arrowheads = if_else((arrowhead.x & !arrowhead.y & isBidrectional.x & isBidrectional.y),    # TRUE FALSE TRUE TRUE
+                                  0, arrowheads, missing = arrowheads),
+             arrowheads = if_else((!arrowhead.x & arrowhead.y & isBidrectional.x & isBidrectional.y),    # FALSE TRUE TRUE TRUE
+                                  1, arrowheads, missing = arrowheads),
+             arrowheads = if_else((arrowhead.x & arrowhead.y & isBidrectional.x & isBidrectional.y),     # TRUE TRUE TRUE TRUE
+                                  2, arrowheads, missing = arrowheads)
+      ) 
+    
+    # Add labels to the edges and merge with concept data to map node IDs to labels.
+    edges8 <- edges7 %>%
+      left_join(concepts %>% rename(fromLabel = label), by = c("idFrom" = "id")) %>%
+      left_join(phrases, by = c("idLink" = "id")) %>%
+      left_join(concepts %>% rename(toLabel = label), by = c("idTo" = "id")) %>%
+      mutate(width = width.x,                                                                            # Select width of first connection
+             width = ifelse(is.na(width), 1, width),
+             color.color = ifelse(is.na(color.color.x), color.color.y, color.color.x)) %>%               # Select color of one connection
+      select(fromLabel, label, toLabel, arrowheads, width, color.color) %>%
+      arrange(fromLabel, toLabel)
   } else {
-    edges6 <- edges4 %>%     
-      filter(!is.na(idFrom)) %>%
-      bind_rows(edges5)
+    edges7 <- data.frame(idFrom = character(),
+                         idTo = character())
+    edges8 <- data.frame(fromLabel = character(),
+                         label = character(),
+                         toLabel = character(),
+                         arrowheads = numeric(),
+                         width = numeric(),
+                         color.color = character())
   }
-  
-  # In CmapTools, arrow visibility and directionality are separate settings, i.e.,
-  # an arrow can have a direction without a visible arrowhead.
-  # The following code makes decisions about how the map is actually shown in CmapTools 
-  # and deals with the fact that "A - Label - B" is represented as two connections 
-  # in Cmaptools that can have different arrow visibility/directionality, which contrasts 
-  # with how it is represented in R/visNetwork.
-  # All combinations of visibility and directionality: 
-  #   expand.grid(arrowhead.x = c(FALSE, TRUE), arrowhead.y = c(FALSE, TRUE), isBidrectional.x = c(FALSE, TRUE), isBidrectional.y = c(FALSE, TRUE))
-  edges7 <- edges6 %>%
-    mutate(arrowhead.x = if_else(arrowhead.x == "no" | is.na(arrowhead.x), FALSE, TRUE),
-           arrowhead.y = if_else(arrowhead.y == "no" | is.na(arrowhead.y), FALSE, TRUE),
-           isBidrectional.x = if_else(is.na(isBidrectional.x), FALSE, TRUE),
-           isBidrectional.y = if_else(is.na(isBidrectional.y), FALSE, TRUE)
-    ) %>%
-    mutate(arrowheads = NA,
-           arrowheads = if_else((!arrowhead.x & !arrowhead.y & !isBidrectional.x & !isBidrectional.y), # FALSE FALSE FALSE FALSE
-                                0, arrowheads, missing = arrowheads),
-           arrowheads = if_else((arrowhead.x & !arrowhead.y & !isBidrectional.x & !isBidrectional.y),  # TRUE FALSE FALSE FALSE
-                                0, arrowheads, missing = arrowheads),
-           arrowheads = if_else((!arrowhead.x & arrowhead.y & !isBidrectional.x & !isBidrectional.y),  # FALSE TRUE FALSE FALSE 
-                                1, arrowheads, missing = arrowheads),
-           arrowheads = if_else((arrowhead.x & arrowhead.y & !isBidrectional.x & !isBidrectional.y),   # TRUE TRUE FALSE FALSE
-                                1, arrowheads, missing = arrowheads),
-           arrowheads = if_else((!arrowhead.x & !arrowhead.y & isBidrectional.x & !isBidrectional.y),  # FALSE FALSE TRUE FALSE
-                                0, arrowheads, missing = arrowheads),
-           arrowheads = if_else((arrowhead.x & !arrowhead.y & isBidrectional.x & !isBidrectional.y),   # TRUE FALSE TRUE FALSE
-                                0, arrowheads, missing = arrowheads),
-           arrowheads = if_else((!arrowhead.x & arrowhead.y & isBidrectional.x & !isBidrectional.y),   # FALSE TRUE TRUE FALSE
-                                1, arrowheads, missing = arrowheads),
-           arrowheads = if_else((arrowhead.x & arrowhead.y & isBidrectional.x & !isBidrectional.y),    # TRUE TRUE TRUE FALSE
-                                1, arrowheads, missing = arrowheads),
-           arrowheads = if_else((!arrowhead.x & !arrowhead.y & !isBidrectional.x & isBidrectional.y),  # FALSE FALSE FALSE TRUE
-                                0, arrowheads, missing = arrowheads),
-           arrowheads = if_else((arrowhead.x & !arrowhead.y & !isBidrectional.x & isBidrectional.y),   # TRUE FALSE FALSE TRUE
-                                0, arrowheads, missing = arrowheads),
-           arrowheads = if_else((!arrowhead.x & arrowhead.y & !isBidrectional.x & isBidrectional.y),   # FALSE TRUE FALSE TRUE
-                                1, arrowheads, missing = arrowheads),
-           arrowheads = if_else((arrowhead.x & arrowhead.y & !isBidrectional.x & isBidrectional.y),    # TRUE TRUE FALSE TRUE
-                                1, arrowheads, missing = arrowheads),
-           arrowheads = if_else((!arrowhead.x & !arrowhead.y & isBidrectional.x & isBidrectional.y),   # FALSE FALSE TRUE TRUE
-                                0, arrowheads, missing = arrowheads),
-           arrowheads = if_else((arrowhead.x & !arrowhead.y & isBidrectional.x & isBidrectional.y),    # TRUE FALSE TRUE TRUE
-                                0, arrowheads, missing = arrowheads),
-           arrowheads = if_else((!arrowhead.x & arrowhead.y & isBidrectional.x & isBidrectional.y),    # FALSE TRUE TRUE TRUE
-                                1, arrowheads, missing = arrowheads),
-           arrowheads = if_else((arrowhead.x & arrowhead.y & isBidrectional.x & isBidrectional.y),     # TRUE TRUE TRUE TRUE
-                                2, arrowheads, missing = arrowheads)
-    ) 
-  
-  # Add labels to the edges and merge with concept data to map node IDs to labels.
-  edges8 <- edges7 %>%
-    left_join(concepts %>% rename(fromLabel = label), by = c("idFrom" = "id")) %>%
-    left_join(phrases, by = c("idLink" = "id")) %>%
-    left_join(concepts %>% rename(toLabel = label), by = c("idTo" = "id")) %>%
-    mutate(width = width.x,                                                                            # Select width of first connection
-           width = ifelse(is.na(width), 1, width),
-           color.color = ifelse(is.na(color.color.x), color.color.y, color.color.x)) %>%               # Select color of one connection
-    select(fromLabel, label, toLabel, arrowheads, width, color.color) %>%
-    arrange(fromLabel, toLabel)
   
   # --- Restructure nodes ---
   # Extract unique nodes from the edges and merge with appearance data
@@ -1206,112 +1230,136 @@ writeCXL <- function(nodes = NULL, edges = NULL, file = NULL) {
   map <- xml_add_child(root, "map")
   
   # Add child nodes
-  concept_list_node <- xml_add_child(map, "concept-list")
-  linking_phrase_list_node <- xml_add_child(map, "linking-phrase-list")
-  connection_list_node <- xml_add_child(map, "connection-list")
-  concept_appearance_list_node <- xml_add_child(map, "concept-appearance-list")
-  linking_phrase_appearance_list_node <- xml_add_child(map, "linking-phrase-appearance-list")
-  connection_appearance_list_node <- xml_add_child(map, "connection-appearance-list")
-  
+  if (nrow(nodes) > 0) {
+    concept_list_node <- xml_add_child(map, "concept-list")
+    concept_appearance_list_node <- xml_add_child(map, "concept-appearance-list")
+  }
+  if (nrow(edges) > 0) {
+    linking_phrase_list_node <- xml_add_child(map, "linking-phrase-list")
+    connection_list_node <- xml_add_child(map, "connection-list")
+    linking_phrase_appearance_list_node <- xml_add_child(map, "linking-phrase-appearance-list")
+    connection_appearance_list_node <- xml_add_child(map, "connection-appearance-list")
+  }
+
   # Prepare nodes
-  colors <- col2rgb(nodes$color.background) %>%
-    t() %>%
-    as.data.frame() %>% 
-    mutate(color.background = paste0(red, ",", green, ",", blue, ",255"))
-  nodes <- nodes %>%
-    mutate(x = x - min(nodes$x) + 250,
-           y = y - min(nodes$y) + 250,
-           size = rescale(as.integer(size), 25, 50),
-           color.background = colors$color.background)
+  if (nrow(nodes) > 0) {
+    colors <- nodes$color.background %>%
+      str_replace(fixed("rgba(0,0,0,0)"), "#97c2fc") %>%                        # Hidden elements are shown in default color
+      col2rgb() %>%
+      t() %>%
+      as.data.frame() %>% 
+      mutate(color.background = paste0(red, ",", green, ",", blue, ",255"))
+    nodes <- nodes %>%
+      mutate(x = x - min(nodes$x) + 250,
+             y = y - min(nodes$y) + 250,
+             size = rescale(as.integer(size), 25, 50),
+             color.background = colors$color.background)
+  }
   
   # Prepare phrases
-  phrases <- edges %>%
-    select(id, from, label, to, fromLabel, toLabel) %>%
-    left_join(nodes %>%
-                select(id, xFrom = x, yFrom = y),
-              by = c("from" = "id")) %>%
-    left_join(nodes %>%
-                select(id, xTo = x, yTo = y),
-              by = c("to" = "id")) %>%
-    mutate(x = as.integer((xFrom + xTo) / 2),
-           y = as.integer((yFrom + yTo) / 2))
+  if (nrow(edges) > 0) {
+    phrases <- edges %>%
+      select(id, from, label, to, fromLabel, toLabel) %>%
+      left_join(nodes %>%
+                  select(id, xFrom = x, yFrom = y),
+                by = c("from" = "id")) %>%
+      left_join(nodes %>%
+                  select(id, xTo = x, yTo = y),
+                by = c("to" = "id")) %>%
+      mutate(x = as.integer((xFrom + xTo) / 2),
+             y = as.integer((yFrom + yTo) / 2))
+  }
   
   # Prepare connections
-  colors <- col2rgb(edges$color.color) %>%
-    t() %>%
-    as.data.frame() %>% 
-    mutate(color = paste0(red, ",", green, ",", blue, ",255"))
-  connections <- edges %>%
-    select(from, to = id, arrowheads, width) %>%
-    mutate(from2 = from,
-           from = ifelse(arrowheads == 2, to, from2),
-           to = ifelse(arrowheads == 2, from2, to)) %>%                         # Switch source and target for 'from' arrows
-    select(-from2) %>%
-    bind_rows(edges %>%
-                select(from = id, to, arrowheads, width)) %>%
-    mutate(id = 1:n(),
-           arrows = if_else(arrowheads > 0, "if-to-concept", "no", missing = "no"),
-           color = rep(colors$color, 2)) %>%
-    select(id, from, to, everything())
-  
+  if (nrow(edges) > 0) {
+    colors <- edges$color.color %>%
+      str_replace(fixed("rgba(0,0,0,0)"), "#97c2fc") %>%                        # Hidden elements are shown in default color
+      col2rgb() %>%
+      t() %>%
+      as.data.frame() %>% 
+      mutate(color = paste0(red, ",", green, ",", blue, ",255"))
+    connections <- edges %>%
+      select(from, to = id, arrowheads, width) %>%
+      mutate(from2 = from,
+             from = if_else(arrowheads == 2, to, from2),
+             to = if_else(arrowheads == 2, from2, to)) %>%                         # Switch source and target for 'from' arrows
+      select(-from2) %>%
+      bind_rows(edges %>%
+                  select(from = id, to, arrowheads, width)) %>%
+        mutate(id = 1:n(),
+             arrows = if_else(arrowheads > 0, "if-to-concept", "no", missing = "no"),
+             color = rep(colors$color, 2)) %>%
+        select(id, from, to, everything())
+  }
+
   # Add concepts
-  for (i in 1:nrow(nodes)) {
-    xml_add_child(concept_list_node, "concept", 
-                  id = as.character(nodes$id[i]), 
-                  label = as.character(nodes$label[i]))
+  if (nrow(nodes) > 0) {
+    for (i in 1:nrow(nodes)) {
+      xml_add_child(concept_list_node, "concept", 
+                    id = as.character(nodes$id[i]), 
+                    label = as.character(nodes$label[i]))
+    }
+  }
+  
+  # Add concept appearances
+  if (nrow(nodes) > 0) {
+    for (i in 1:nrow(nodes)) {
+      xml_add_child(concept_appearance_list_node, "concept-appearance", 
+                    id = as.character(nodes$id[i]), 
+                    x = as.character(nodes$x[i]), 
+                    y = as.character(nodes$y[i]), 
+                    width = as.character(nodes$size[i]),
+                    height = as.character(nodes$size[i]),
+                    "min-width" = as.character(nodes$size[i]),
+                    #"min-height" = as.character(nodes$size[i]),                 
+                    "background-color" = as.character(nodes$color.background[i]),
+                    "border-color" = as.character(nodes$color.background[i]),
+                    "border-shape" = "oval")
+    }
   }
   
   # Add linking phrases
-  for (i in 1:nrow(phrases)) {
-    xml_add_child(linking_phrase_list_node, "linking-phrase", 
-                  id = as.character(phrases$id[i]), 
-                  label = as.character(phrases$label[i]))
-    
+  if (nrow(edges) > 0) {
+    for (i in 1:nrow(phrases)) {
+      xml_add_child(linking_phrase_list_node, "linking-phrase", 
+                    id = as.character(phrases$id[i]), 
+                    label = as.character(phrases$label[i]))
+    }
   }
   
   # Add connections
-  for (i in 1:nrow(connections)) {
-    xml_add_child(connection_list_node, "connection", 
-                  id = as.character(connections$id[i]), 
-                  "from-id" = as.character(connections$from[i]),
-                  "to-id" = as.character(connections$to[i]))
-    
+  if (nrow(edges) > 0) {
+    for (i in 1:nrow(connections)) {
+      xml_add_child(connection_list_node, "connection", 
+                    id = as.character(connections$id[i]), 
+                    "from-id" = as.character(connections$from[i]),
+                    "to-id" = as.character(connections$to[i]))
+    }
   }
-  
-  # Add connection appearances
-  for (i in 1:nrow(nodes)) {
-    xml_add_child(concept_appearance_list_node, "concept-appearance", 
-                  id = as.character(nodes$id[i]), 
-                  x = as.character(nodes$x[i]), 
-                  y = as.character(nodes$y[i]), 
-                  width = as.character(nodes$size[i]),
-                  height = as.character(nodes$size[i]),
-                  "min-width" = as.character(nodes$size[i]),
-                  #"min-height" = as.character(nodes$size[i]),                 
-                  "background-color" = as.character(nodes$color.background[i]),
-                  "border-color" = as.character(nodes$color.background[i]),
-                  "border-shape" = "oval")
-  }
-  
+
   # Add linking phrase appearance
-  for (i in 1:nrow(phrases)) {
-    xml_add_child(linking_phrase_appearance_list_node, "linking-phrase-appearance", 
-                  id = as.character(phrases$id[i]),
-                  x = as.character(phrases$x[i]),
-                  y = as.character(phrases$y[i]))
-    
+  if (nrow(edges) > 0) {
+    for (i in 1:nrow(phrases)) {
+      xml_add_child(linking_phrase_appearance_list_node, "linking-phrase-appearance", 
+                    id = as.character(phrases$id[i]),
+                    x = as.character(phrases$x[i]),
+                    y = as.character(phrases$y[i]))
+      
+    }
   }
   
   # Add connection appearances
-  for (i in 1:nrow(connections)) {
-    xml_add_child(connection_appearance_list_node, "connection-appearance", 
-                  id = as.character(connections$id[i]), 
-                  arrowhead = as.character(connections$arrows[i]),
-                  thickness = as.character(connections$width[i]),
-                  color = as.character(connections$color[i])
-    )
+  if (nrow(edges) > 0) {
+    for (i in 1:nrow(connections)) {
+      xml_add_child(connection_appearance_list_node, "connection-appearance", 
+                    id = as.character(connections$id[i]), 
+                    arrowhead = as.character(connections$arrows[i]),
+                    thickness = as.character(connections$width[i]),
+                    color = as.character(connections$color[i])
+      )
+    }
   }
-  
+
   # Save the XML document to a file
   write_xml(doc, file)
 }
@@ -1396,7 +1444,9 @@ restructureAndFillData <- function(data) {
       return(as.character(rep(NA, nrow(nodes))))
     }
   })
-  
+  nodes <- nodes %>%
+    mutate(size = as.numeric(size))
+    
   # Clean nodes
   nodes <- nodes %>%
     mutate(across(where(is.character), str_trim),                               # Remove leading and trailing whitespace
@@ -1443,6 +1493,8 @@ restructureAndFillData <- function(data) {
       return(as.character(rep(NA, nrow(edges))))
     }
   })
+  edges <- edges %>%
+    mutate(across(c(arrowheads, width, font.size), ~as.numeric(.)))
   
   # Clean edges
   edges <- edges %>%
@@ -1553,7 +1605,7 @@ prepareDataMatched <- function(data1 = NULL,
   # For datasets with multiple filenames or if data2 is provided, ensure consistency 
   # by adjusting the 'fromLabel' and 'toLabel' columns to match "A - B" with "B - A" 
   # for undirected arrows (arrowheads == 0).
-  if ((length(unique(data1$edges$filename)) > 1) | (!is.null(data2))) {
+  if ((length(unique(data1$edges$filename)) > 1) | (nrow(data2$edges) > 0)) {
     data1$edges <- data1$edges %>%
       rowwise() %>%
       mutate(fromLabel2 = ifelse(arrowheads == 0, sort(c(fromLabel, toLabel))[1], fromLabel),
@@ -1732,7 +1784,7 @@ prepareDataAgg <- function(data = NULL) {
       nTotal = length(unique(.$filename)),                                      # Count the number of unique filenames
       filename = paste(filename, collapse = ", ")) %>%                          # Combine all filenames into a single string
     ungroup()
-  
+
   # Aggregate edges
   edgesAgg <- data$edges %>%
     distinct(filename, fromLabel, label, toLabel, .keep_all = TRUE) %>%         # Keep only unique rows per file
@@ -1744,8 +1796,15 @@ prepareDataAgg <- function(data = NULL) {
     mutate(arrowheads = ifelse(arrowheads %in% c(1, 2), arrowheads, 0)) %>%     # Keep arrows if all files had to same arrow type (i.e., there are no decimal digits)
     ungroup() 
   
+  # Ensure correct data types if there are now edges
+  if (nrow(edgesAgg) == 0) {
+    edgesAgg <- edgesAgg %>%
+      mutate(across(c(fromLabel, label, toLabel, filename), ~as.character(.)),
+             across(c(n, nTotal, arrowheads), ~as.integer(.)))
+  }
+  
   # Return the aggregated dataframes
-  return(list(nodes = nodesAgg, edges = edgesAgg) )
+  return(list(nodes = nodesAgg, edges = edgesAgg))
 }
 
 #' @description This function computes a selection of network measures for each network file, 
@@ -1782,14 +1841,8 @@ computeNetworkMeasures <- function(data = NULL) {
   
   # --- Get number of files ---
   # Extract unique filenames from the edge dataframe to process each network separately.
-  files <- c(unique(data$edges$filename))
+  files <- c(unique(data$nodes$filename))
   nFiles <- length(files)
-  
-  # --- Stop if no data ---
-  # Return the empty values list if no edge data is available.
-  if (nrow(data$edges) == 0) {
-    return(values)
-  }
   
   # --- Compute measures for each file ---
   # Loop over each network file to compute the measures.
@@ -1843,7 +1896,6 @@ computeNetworkMeasures <- function(data = NULL) {
   values$density <- round(mean(values$density), 2)
   values$diameter  <- round(mean(values$diameter), 2)
   values$distance <- round(mean(values$distance), 2)
-  
   values$degree <- values$degree %>% 
     group_by(label) %>% 
     summarize(val = round(mean(val), 2))
@@ -1853,6 +1905,22 @@ computeNetworkMeasures <- function(data = NULL) {
   values$closeness <- values$closeness %>% 
     group_by(label) %>% 
     summarize(val = round(mean(val), 2))
+  
+  # Replace NaN
+  replace_nan <- function(df) {
+    if (is.data.frame(df) && "val" %in% colnames(df)) {
+      # Check it's a data frame with "val"
+      df$val[is.nan(df$val)] <- 0
+    } else if (is.numeric(df) && length(df) == 1) {
+      # Handle the case where it's a single numeric value (like values$distance)
+      df[is.nan(df)] <- 0
+    }
+    return(df)
+  }
+  
+  for (name in names(values)) {
+    values[[name]] <- replace_nan(values[[name]])
+  }
   
   # --- Return the computed network measures ---
   return(values)
@@ -1885,7 +1953,7 @@ prepareDataMap <- function(data1 = NULL,
     select(-starts_with("size")) %>%                                                   # Remove existing size columns
     left_join(centrality %>% rename(sizeUnscaled = val)) %>%                           # Merge centrality values
     mutate(isUnique = ifelse(label %in% c(data2$nodes$label), "no", "yes"),            # Determine if the node is unique
-           isUnique = ifelse(rep(nrow(data2$edges) == 0, nrow(.)), "no", isUnique),    # Set to 'no' if no data2 available
+           isUnique = ifelse(rep(nrow(data2$nodes) == 0, nrow(.)), "no", isUnique),    # Set to 'no' if no data2 available
            isUnique = factor(isUnique, levels = c("no", "yes")),        
            p = round(n/nTotal*100, 0),                                                 # Calculate percentage presence of each node
            labelStar = ifelse(isUnique == "no", label, paste0("*** ", label, " ***")), # Mark unique nodes with stars
@@ -2120,14 +2188,27 @@ prepareTblCentrality <- function(centrality1 = NULL, centrality2 = NULL,
 #'
 #' @export
 prepareTblFile <- function(data1 = NULL, data2 = NULL, lang = NULL, comparisonData = NULL) {
-  # --- Initialize comparison data if not available ---
+  # Initialize comparison data if not available
   if (!comparisonData) {
     data2 <- data.frame() %>%
       restructureAndFillData()
   }
   
+  data1$edges %>%
+    mutate(edgeIsUnique = ifelse(paste0(fromLabel, label, toLabel, arrowheads) %in% 
+                                   paste0(data2$edges$fromLabel, data2$edges$label, data2$edges$toLabel, data2$edges$arrowheads),
+                                 "no", 
+                                 "yes"),
+           edgeIsUnique = ifelse(rep(nrow(data2$edges) == 0, nrow(.)), "no", edgeIsUnique)) %>%
+    group_by(filename, edgeIsUnique) %>%
+    summarize(nEdge = n()) %>%
+    ungroup() %>%
+    mutate(edgeIsUnique = factor(edgeIsUnique, levels = c("no", "yes"), labels = c("EdgeShared", "EdgeUnique"))) %>%
+    complete(filename, edgeIsUnique) %>%
+    pivot_wider(names_from = edgeIsUnique, values_from = nEdge, names_prefix = "n")
+  
   # Prepare node-level summary
-  tblFile <- data1$nodes %>%
+  nodeSummary <- data1$nodes %>%
     mutate(isIsolate = factor(isIsolate, levels = c(FALSE, TRUE), labels = c("Node", "Iso")),
            isUnique = ifelse(label %in% c(data2$nodes$label), "Shared", "Unique"),
            isUnique = factor(isUnique, levels = c("Shared", "Unique"))) %>%
@@ -2135,20 +2216,30 @@ prepareTblFile <- function(data1 = NULL, data2 = NULL, lang = NULL, comparisonDa
     summarize(nNode = n()) %>%
     ungroup() %>%
     complete(filename, isUnique, isIsolate) %>%
-    pivot_wider(names_from = c(isIsolate, isUnique), values_from = nNode, names_prefix = "n", names_sep = "") %>%
-    # Prepare edge-level summary
-    left_join(data1$edges %>%
-                mutate(edgeIsUnique = ifelse(paste0(fromLabel, label, toLabel, arrowheads) %in% 
-                                               paste0(data2$edges$fromLabel, data2$edges$label, data2$edges$toLabel, data2$edges$arrowheads),
-                                             "no", 
-                                             "yes"),
-                       edgeIsUnique = ifelse(rep(nrow(data2$edges) == 0, nrow(.)), "no", edgeIsUnique)) %>%
-                group_by(filename, edgeIsUnique) %>%
-                summarize(nEdge = n()) %>%
-                ungroup() %>%
-                mutate(edgeIsUnique = factor(edgeIsUnique, levels = c("no", "yes"), labels = c("EdgeShared", "EdgeUnique"))) %>%
-                complete(filename, edgeIsUnique) %>%
-                pivot_wider(names_from = edgeIsUnique, values_from = nEdge, names_prefix = "n")) %>%
+    pivot_wider(names_from = c(isIsolate, isUnique), values_from = nNode, names_prefix = "n", names_sep = "")
+  
+  # Prepare edge-level summary
+  if (nrow(data1$edges) == 0) {
+    # Create an empty df with the necessary columns.
+    edgeSummary <- data.frame(filename = character(), nEdgeUnique = numeric(), nEdgeShared = numeric()) 
+  } else {
+    edgeSummary <- data1$edges %>%
+      mutate(edgeIsUnique = ifelse(paste0(fromLabel, label, toLabel, arrowheads) %in% 
+                                     paste0(data2$edges$fromLabel, data2$edges$label, data2$edges$toLabel, data2$edges$arrowheads),
+                                   "no", 
+                                   "yes"),
+             edgeIsUnique = ifelse(rep(nrow(data2$edges) == 0, nrow(.)), "no", edgeIsUnique)) %>%
+      group_by(filename, edgeIsUnique) %>%
+      summarize(nEdge = n()) %>%
+      ungroup() %>%
+      mutate(edgeIsUnique = factor(edgeIsUnique, levels = c("no", "yes"), labels = c("EdgeShared", "EdgeUnique"))) %>%
+      complete(filename, edgeIsUnique) %>%
+      pivot_wider(names_from = edgeIsUnique, values_from = nEdge, names_prefix = "n")  
+  }
+  
+  # Prepare table
+  tblFile <- nodeSummary %>%
+    left_join(edgeSummary) %>%
     ungroup() %>%
     # Compute total and percentage values
     mutate(across(everything(), ~replace_na(., 0)),
@@ -2278,7 +2369,7 @@ prepareTblNode <- function(data = NULL, lang = NULL, comparisonData = NULL) {
       restructureAndFillData()
   }
 
-  # Select columns
+  # Prepare table
   tblNode <- data$nodes %>%
     select(label, isUnique, p, filename)
   
@@ -2341,7 +2432,7 @@ prepareTblNode <- function(data = NULL, lang = NULL, comparisonData = NULL) {
 #'
 #' @export
 prepareTblEdge <- function(data = NULL, lang = NULL, comparisonData = NULL) {
-  # Select columns
+  # Prepare table
   tblEdge <- data$edges %>%
     select(fromLabel, label, toLabel, labelTable, isUnique, p, filename)
   
@@ -2404,10 +2495,15 @@ prepareTblEdge <- function(data = NULL, lang = NULL, comparisonData = NULL) {
 #'
 #' @export
 prepareTblMatched <- function(data = NULL, lang = NULL) {
-  # Select columns
+  # Prepare table
   tblMatched <- data$edges %>%
-    select(fromLabel, label, toLabel, arrowheads, filename) 
-  
+    # Select columns
+    select(fromLabel, label, toLabel, arrowheads, filename) %>%
+    # Add isolates
+    full_join(data$nodes %>%
+                filter(isIsolate) %>%
+                select(fromLabel = label, filename))
+
   # Rename columms
   cols <- c(lang$tabAnalyze$tblEdge$from,
             lang$tabAnalyze$tblEdge$label,
@@ -2419,7 +2515,7 @@ prepareTblMatched <- function(data = NULL, lang = NULL) {
     rename_with(.fn = ~cols)
   
   # Remove 'Arrows' column if there are no arrows
-  if (all(tblMatched[4] == 0)) {                                     
+  if (all(tblMatched[4] == 0 | is.na(tblMatched[4]))) {                                     
     tblMatched <- tblMatched[, -4]
   }
   
@@ -2440,8 +2536,7 @@ prepareTblMatched <- function(data = NULL, lang = NULL) {
 #'
 #' @export
 prepareTblBoxes <- function(centrality1 = NULL, centrality2 = NULL, lang = NULL, comparisonData = NULL) {
-  
-  # Prepare primary data summary
+  # Prepare primary data table
   tblBoxes <- tibble(measure = names(unlist(centrality1))[1:4],
                      primary = as.numeric(unlist(centrality1)[1:4]))
   
@@ -2589,6 +2684,9 @@ writeXlsxEdgeList <- function(nodes = NULL, edges = NULL, file = NULL) {
 #' @export
 networkPlot <- function(nodes = NULL, edges = NULL, layout = NULL, manipulation = FALSE, randomSeed = 42) {
   # General setup for visNetwork plot
+  visNetwork(nodes = nodes %>% 
+               select(-id), edges = edges %>% select(-id))
+  
   p <- visNetwork(nodes = nodes, edges = edges) %>%
     visEdges(arrows = list(to = list(scaleFactor = 0.5),
                            from = list(scaleFactor = 0.5)),

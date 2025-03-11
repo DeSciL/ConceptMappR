@@ -12,6 +12,6 @@ authors:
   orcid: "0000-0002-5942-3273"
 title: "ConceptMappR"
 version: 1.0.0
-doi: 10.5281/zenodo.1234
+doi: https://doi.org/10.5281/zenodo.14938859
 date-released: 2025-02-27
 url: "https://github.com/brunoruetsche/ConceptMappR"

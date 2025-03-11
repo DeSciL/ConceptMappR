@@ -522,10 +522,8 @@ server <- function(input, output, session) {
   rv <- reactiveValues(multipleFiles = NULL,                                    # Will be set to FALSE when a single primary file is uploaded, TRUE if multiple files are uploaded
                        comparisonData = NULL,                                   # Will be set to FALSE when no comparison file is uploaded, TRUE if a comparison file is uploaded
                        
-                       readFile1 = 0,                                           # Counter that is increased to trigger reading the uploaded primary file(s)
-                       readFile2 = 0,                                           # Counter that is increased to trigger reading the uploaded comparison file
-                       retrieveDrawing = 0,                                     # Counter that is increased to trigger retrieving the drawn map for analysis
                        initPlotMapDraw = 0,                                     # Counter that is increased to trigger reading the uploaded files
+                       startAnalysis = 0,                                       # Counter that is increased to trigger the analysis
                        
                        dataDraw = NULL,                                         # Data of the drawing
                        
@@ -635,22 +633,12 @@ server <- function(input, output, session) {
     # Read file
     data <- readFiles(input$fileDraw)
     
-    # Stop if there was an error
-    if (!is.list(data)) {
-      showModal(modalDialog(
-        title = lang$sidebar$upload$popUpReadErrorTitle,
-        paste0(lang$sidebar$upload$popUpReadErrorMessage, data),
-        easyClose = TRUE,
-        footer =  modalButton(lang$sidebar$upload$popUpReadErrorButtonLabel)
-      )) 
-      
-      # Reset
-      rv$reset <- rv$reset + 1
-      
-      # Do not continue
-      req(FALSE)  
+    # Check if the returned value is a filename (character)
+    if (is.character(data)) {
+      showNotification(paste0(lang$sidebar$upload$errorMessage, " ", data), type = "error")        # Show popup
+      req(FALSE)                                                                                   # Do not continue
     }
-    
+ 
     # (Re)set stored manual positions
     rv$posMapDrawManual <- NULL
     
@@ -670,209 +658,250 @@ server <- function(input, output, session) {
   output$plotMapDraw <- renderVisNetwork({
     req(input$layoutDraw, input$randomSeedDraw)
     
-    if (is.null(rv$dataDraw)) {
-      # Set up data for initial plot
-      rv$dataDraw <- data.frame(fromLabel = c("A","B", "A"), 
-                                label = c("E1", "E2", "E3"),
-                                toLabel = c("B","C", "C"),
-                                arrowheads = c(0, 1, 2),
-                                check.names = FALSE
-                                ) %>%
-        restructureAndFillData()
+    tryCatch({
+      if (is.null(rv$dataDraw)) {
+        # Set up data for initial plot
+        rv$dataDraw <- data.frame(fromLabel = c("A","B", "A"), 
+                                  label = c("E1", "E2", "E3"),
+                                  toLabel = c("B","C", "C"),
+                                  arrowheads = c(0, 1, 2),
+                                  check.names = FALSE
+                                  ) %>%
+          restructureAndFillData()
+        
+        rv$dataDraw$nodes <- rv$dataDraw$nodes %>%
+          mutate(x = c(-60, 60, 0),
+                 y = c(0, 0, -100))
+      } else {
+        # Remove node positions (e.g., in case layout was changed)
+        rv$dataDraw$nodes$y <- NULL
+        rv$dataDraw$nodes$x <- NULL
+      }
       
-      rv$dataDraw$nodes <- rv$dataDraw$nodes %>%
-        mutate(x = c(-60, 60, 0),
-               y = c(0, 0, -100))
-    } else {
-      # Remove node positions (e.g., in case layout was changed)
-      rv$dataDraw$nodes$y <- NULL
-      rv$dataDraw$nodes$x <- NULL
-    }
+      # Add node positions for manual layout
+      if ((input$layoutDraw == "manual") & 
+          (!is.null(rv$posMapDrawManual))) {
+        rv$dataDraw$nodes <- addPositions(data = rv$dataDraw$nodes, pos = rv$posMapDrawManual)
+      }
+      
+      # Create plot
+      networkPlot(nodes = rv$dataDraw$nodes, edges = rv$dataDraw$edges, layout = input$layoutDraw, manipulation = TRUE, randomSeed = input$randomSeedDraw)
+    },
+    error = function(e) {
+      showNotification(lang$tabDraw$errorMessage, type = "error")               # Show popup
+      req(FALSE)                                                                # Do not continue
+    })
 
-    # Add node positions for manual layout
-    if ((input$layoutDraw == "manual") & 
-        (!is.null(rv$posMapDrawManual))) {
-      rv$dataDraw$nodes <- addPositions(data = rv$dataDraw$nodes, pos = rv$posMapDrawManual)
-    }
-    
-    # Create plot
-    networkPlot(nodes = rv$dataDraw$nodes, edges = rv$dataDraw$edges, layout = input$layoutDraw, manipulation = TRUE, randomSeed = input$randomSeedDraw)
   }) %>%
     bindEvent(rv$initPlotMapDraw, input$layoutDraw, input$randomSeedDraw)
   
   ## Update dataDraw / plotMapDraw ----
   observeEvent(input$plotMapDraw_graphChange, {
     req(input$plotMapDraw_initialized)
-    graphChange <- input$plotMapDraw_graphChange
-
-    # Reset hasChanged
-    if (nrow(rv$dataDraw$nodes) > 0) {
-      rv$dataDraw$nodes$hasChanged <- FALSE
-    }
-    if (nrow(rv$dataDraw$edges) > 0) {
-      rv$dataDraw$edges$hasChanged <- FALSE
-    }
-
-    # Add unique index
-    thisLabel = graphChange$name
-    if (graphChange$cmd %in% c("addNode", "editNode")) {
-      thisLabel <- checkLabel(newLabel = thisLabel, 
-                              currentLabels = rv$dataDraw$nodes[ ! rv$dataDraw$nodes$id == graphChange$id, "label"])
-    }
     
-    # Set min / max values
-    thisSize <- pmin(pmax(graphChange$size, 1), 100)
-    thisWidth <- pmin(pmax(graphChange$width, 1), 10)
-    thisArrowheads <- pmin(pmax(graphChange$arrowheads, 0), 2)
-    thisColoring <- graphChange$coloring
-    
-    # If a node was added
-    if (graphChange$cmd == "addNode") {
-      rv$dataDraw$nodes <- rv$dataDraw$nodes %>%
-        bind_rows(data.frame(id = graphChange$id,
-                             label = thisLabel,
-                             size = thisSize,
-                             color.background = graphChange$coloring,
-                             hasChanged = TRUE))
-      
-    # If an edge was added
-    } else if (graphChange$cmd == "addEdge") {
-      rv$dataDraw$edges <- rv$dataDraw$edges %>%
-        bind_rows(data.frame(id = graphChange$id,
-                             fromLabel = rv$dataDraw$nodes[rv$dataDraw$nodes$id == graphChange$from, "label"][[1]],
-                             label = "",
-                             toLabel = rv$dataDraw$nodes[rv$dataDraw$nodes$id == graphChange$to, "label"][[1]],
-                             hasChanged = TRUE))
-    # If a node was edited
-    } else if (graphChange$cmd == "editNode") {
-      rv$dataDraw$nodes <- rv$dataDraw$nodes %>%
-        mutate(label = ifelse(id == graphChange$id, thisLabel, label),
-               color.background = ifelse(id == graphChange$id,  graphChange$coloring, color.background),
-               size = ifelse(id == graphChange$id,  thisSize, size),
-               hasChanged = ifelse(id == graphChange$id,  TRUE, FALSE))
-      
-      rv$dataDraw$edges <- rv$dataDraw$edges %>%
-        mutate(fromLabel = as.character(ifelse(from == graphChange$id, thisLabel, fromLabel)),
-               toLabel = as.character(ifelse(to == graphChange$id, thisLabel, toLabel)))
-      
-    # If an edge was edited
-    } else if (graphChange$cmd == "editEdge") {
-      rv$dataDraw$edges <- rv$dataDraw$edges %>%
-        mutate(label = ifelse(id == graphChange$id, thisLabel, label),
-               arrowheads = ifelse(id == graphChange$id, thisArrowheads, arrowheads),
-               width =  ifelse(id == graphChange$id, thisWidth, width),
-               color.color = ifelse(id == graphChange$id, graphChange$coloring, color.color),
-               hasChanged = ifelse(id == graphChange$id,  TRUE, FALSE)) 
-      
-    # If a node or an edge was deleted
-    } else if (graphChange$cmd == "deleteElements") {
-      if (length(graphChange$nodes) > 0) {
-        # Remove node
-        rv$dataDraw$nodes <- rv$dataDraw$nodes %>% 
-          filter(id != graphChange$nodes)
+    tryCatch({
+      graphChange <- input$plotMapDraw_graphChange
+  
+      # Add / reset 'hasChanged' variable that is used to keep track of what 
+      # has been modified during drawing
+      addLogCol <- function(df, column_name) {
+        if (nrow(df) == 0) {
+          # Add an empty column of logical type
+          df[[column_name]] <- logical()
+        } else {
+          # Add a column filled with FALSE
+          df[[column_name]] <- FALSE
+        }
         
-        # Remove edges of this node
-        rv$dataDraw$edges <- rv$dataDraw$edges %>% 
-          filter(from != graphChange$nodes,
-                 to != graphChange$nodes)
-        
-      } else if (length(graphChange$edges) > 0) {
-        rv$dataDraw$edges <- rv$dataDraw$edges %>% 
-          filter(id != graphChange$edges)
+        return(df)
+      }
+      rv$dataDraw$nodes <- addLogCol(rv$dataDraw$nodes, "hasChanged")
+      rv$dataDraw$edges <- addLogCol(rv$dataDraw$edges, "hasChanged")
+  
+      # Add unique index
+      thisLabel = graphChange$name
+      if (graphChange$cmd %in% c("addNode", "editNode")) {
+        thisLabel <- checkLabel(newLabel = thisLabel, 
+                                currentLabels = rv$dataDraw$nodes[ ! rv$dataDraw$nodes$id == graphChange$id, "label"])
       }
       
-    }
-
-    # Add defaults
-    rv$dataDraw <- rv$dataDraw %>%
-      restructureAndFillData()
-
-    # Update plot
-    visNetworkProxy("plotMapDraw") %>%
-      visUpdateNodes(rv$dataDraw$nodes %>%
-                       select(-matches("x"), -matches("y")) %>%
-                       filter(hasChanged)
-      ) %>%
-      visUpdateEdges(rv$dataDraw$edges %>% 
-                       filter(hasChanged)
-      )
+      # Set min / max values
+      thisSize <- pmin(pmax(graphChange$size, 1), 100)
+      thisWidth <- pmin(pmax(graphChange$width, 1), 10)
+      thisArrowheads <- pmin(pmax(graphChange$arrowheads, 0), 2)
+      thisColoring <- graphChange$coloring
+      
+      # If a node was added
+      if (graphChange$cmd == "addNode") {
+        rv$dataDraw$nodes <- rv$dataDraw$nodes %>%
+          bind_rows(data.frame(id = graphChange$id,
+                               label = thisLabel,
+                               size = thisSize,
+                               color.background = graphChange$coloring,
+                               hasChanged = TRUE))
+        
+      # If an edge was added
+      } else if (graphChange$cmd == "addEdge") {
+        rv$dataDraw$edges <- rv$dataDraw$edges %>%
+          bind_rows(data.frame(id = graphChange$id,
+                               fromLabel = rv$dataDraw$nodes[rv$dataDraw$nodes$id == graphChange$from, "label"][[1]],
+                               label = "",
+                               toLabel = rv$dataDraw$nodes[rv$dataDraw$nodes$id == graphChange$to, "label"][[1]],
+                               hasChanged = TRUE))
+      # If a node was edited
+      } else if (graphChange$cmd == "editNode") {
+        rv$dataDraw$nodes <- rv$dataDraw$nodes %>%
+          mutate(label = ifelse(id == graphChange$id, thisLabel, label),
+                 color.background = ifelse(id == graphChange$id,  graphChange$coloring, color.background),
+                 size = ifelse(id == graphChange$id,  thisSize, size),
+                 hasChanged = ifelse(id == graphChange$id,  TRUE, FALSE))
+        
+        rv$dataDraw$edges <- rv$dataDraw$edges %>%
+          mutate(fromLabel = as.character(ifelse(from == graphChange$id, thisLabel, fromLabel)),
+                 toLabel = as.character(ifelse(to == graphChange$id, thisLabel, toLabel)))
+        
+      # If an edge was edited
+      } else if (graphChange$cmd == "editEdge") {
+        rv$dataDraw$edges <- rv$dataDraw$edges %>%
+          mutate(label = ifelse(id == graphChange$id, thisLabel, label),
+                 arrowheads = ifelse(id == graphChange$id, thisArrowheads, arrowheads),
+                 width =  ifelse(id == graphChange$id, thisWidth, width),
+                 color.color = ifelse(id == graphChange$id, graphChange$coloring, color.color),
+                 hasChanged = ifelse(id == graphChange$id,  TRUE, FALSE)) 
+        
+      # If a node or an edge was deleted
+      } else if (graphChange$cmd == "deleteElements") {
+        if (length(graphChange$nodes) > 0) {
+          # Remove node
+          rv$dataDraw$nodes <- rv$dataDraw$nodes %>% 
+            filter(id != graphChange$nodes)
+          
+          # Remove edges of this node
+          rv$dataDraw$edges <- rv$dataDraw$edges %>% 
+            filter(from != graphChange$nodes,
+                   to != graphChange$nodes)
+          
+        } else if (length(graphChange$edges) > 0) {
+          rv$dataDraw$edges <- rv$dataDraw$edges %>% 
+            filter(id != graphChange$edges)
+        }
+        
+      }
+  
+      # Add defaults
+      rv$dataDraw <- rv$dataDraw %>%
+        restructureAndFillData()
+  
+      # Update plot
+      visNetworkProxy("plotMapDraw") %>%
+        visUpdateNodes(rv$dataDraw$nodes %>%
+                         select(-matches("x"), -matches("y")) %>%
+                         filter(hasChanged)
+        ) %>%
+        visUpdateEdges(rv$dataDraw$edges %>% 
+                         filter(hasChanged)
+        )
+      },
+      error = function(e) {
+        showNotification(lang$tabDraw$errorMessage, type = "error")             # Show popup
+        req(FALSE)                                                              # Do not continue
+      }
+    )
   })
 
   ## Get posMapDrawCurrent / posMapDrawManual ----
   observe({
-    # Positions are continuously retrieved
-    invalidateLater(1000, session) 
-    visNetworkProxy("plotMapDraw") %>%
-      visGetPositions()
+    tryCatch({
+      # Positions are continuously retrieved
+      invalidateLater(1000, session) 
+      visNetworkProxy("plotMapDraw") %>%
+        visGetPositions()
+    },
+    error = function(e) {
+      showNotification(lang$tabDraw$errorMessage, type = "error")               # Show popup
+      req(FALSE)                                                                # Do not continue
+    })
   })
   
   observeEvent(c(input$plotMapDraw_positions), {
-    pos <- as.data.frame(t(sapply(input$plotMapDraw_positions,unlist)))
-    
-    if (ncol(pos) > 0) {
-      pos <- pos %>%
-        rownames_to_column(var = "id") %>%
-        mutate(x = ifelse(is.na(x), min(x, na.rm = TRUE), x),
-               y = ifelse(is.na(y), min(y, na.rm = TRUE), y))
-    } else {
-      pos <- data.frame(id = character(), x = integer(), y = integer())  
-    }
-    
-    # Save node positions
-    rv$posMapDrawCurrent <- pos
-    if (input$layoutDraw == "manual") {
-      rv$posMapDrawManual <- pos
-    }
+    tryCatch({
+      pos <- as.data.frame(t(sapply(input$plotMapDraw_positions,unlist)))
+      
+      if (ncol(pos) > 0) {
+        pos <- pos %>%
+          rownames_to_column(var = "id") %>%
+          mutate(x = ifelse(is.na(x), min(x, na.rm = TRUE), x),
+                 y = ifelse(is.na(y), min(y, na.rm = TRUE), y))
+      } else {
+        pos <- data.frame(id = character(), x = integer(), y = integer())  
+      }
+      
+      # Save node positions
+      rv$posMapDrawCurrent <- pos
+      if (input$layoutDraw == "manual") {
+        rv$posMapDrawManual <- pos
+      }
+    },
+    error = function(e) {
+      showNotification(lang$tabDraw$errorMessage, type = "error")               # Show popup
+      req(FALSE)                                                                # Do not continue
+    })
   })
 
   ## Download (downloadButtonDraw) ----
   output$downloadButtonDraw <- downloadHandler(
     filename = function() { rv$files <- prepareFilenames(selection = input$downloadListDraw, comparison = FALSE, basepath = tmpDir, lang = lang)
-                            basename(rv$files$returned) # Remove path
+                            basename(rv$files$returned)                         # Remove path
                           },
     content = function(file) {
-
-      # Create temporary directory
-      dir.create(tmpDir, showWarnings = FALSE, recursive = TRUE)
-      
-      # Prepare data
-      nodes <- rv$dataDraw$nodes %>%
-        mutate(x = rv$posMapDrawCurrent$x,
-               y = rv$posMapDrawCurrent$y,
-               isUnique = "no")                                                 # required by saveNetworkPlot()
-      edges <- rv$dataDraw$edges %>%
-        mutate(isUnique = "no")                                                 # required by saveNetworkPlot()
-      
-      # cxl
-      if ("cxl" %in% names(rv$files)) {
-        writeCXL(nodes = nodes, edges = edges, file = rv$files$cxl)
-      }
-      
-      # xlsxEdgeList
-      if ("xlsxEdgeList" %in% names(rv$files)) {
-        writeXlsxEdgeList(nodes = nodes, edges = edges, file = rv$files$xlsxEdgeList)
-      }
-      
-      # png
-      if ("png" %in% names(rv$files)) {
-        graphPlot <- saveNetworkPlot(nodes = nodes, edges = edges, file = rv$files$png)
-      }
+      tryCatch({
+        # Create temporary directory
+        dir.create(tmpDir, showWarnings = FALSE, recursive = TRUE)
+        
+        # Prepare data
+        nodes <- rv$dataDraw$nodes %>%
+          mutate(x = rv$posMapDrawCurrent$x,
+                 y = rv$posMapDrawCurrent$y,
+                 isUnique = "no")                                               # required by saveNetworkPlot()
+        edges <- rv$dataDraw$edges %>%
+          mutate(isUnique = "no")                                               # required by saveNetworkPlot()
+        
+        # cxl
+        if ("cxl" %in% names(rv$files)) {
+          writeCXL(nodes = nodes, edges = edges, file = rv$files$cxl)
+        }
+        
+        # xlsxEdgeList
+        if ("xlsxEdgeList" %in% names(rv$files)) {
+          writeXlsxEdgeList(nodes = nodes, edges = edges, file = rv$files$xlsxEdgeList)
+        }
+        
+        # png
+        if ("png" %in% names(rv$files)) {
+          graphPlot <- saveNetworkPlot(nodes = nodes, edges = edges, file = rv$files$png)
+        }
+    
+        # svg
+        if ("svg" %in% names(rv$files)) {
+          graphPlot <- saveNetworkPlot(nodes = nodes, edges = edges, file = rv$files$svg)
+        }
   
-      # svg
-      if ("svg" %in% names(rv$files)) {
-        graphPlot <- saveNetworkPlot(nodes = nodes, edges = edges, file = rv$files$svg)
-      }
+        # zip
+        if (length(input$downloadListDraw) > 1) {
+          zip(rv$files$returned, files = unlist( rv$files[ names(rv$files)[ names(rv$files) != "returned"]] ), extras = '-j')
+        }
 
-      # zip
-      if (length(input$downloadListDraw) > 1) {
-        zip(rv$files$returned, files = unlist( rv$files[ names(rv$files)[ names(rv$files) != "returned"]] ), extras = '-j')
-      }
-
-      # Copy created file to the expected 'file' location
-      file.copy(rv$files$returned, file)
-      
-      # Remove temporary directory incl. all files
-      unlink(tmpDir, recursive = TRUE, force = TRUE)
+        # Copy created file to the expected 'file' location
+        file.copy(rv$files$returned, file)
+      },
+      error = function(e) {
+        write("", file = file)                                                  # Write empty file
+        showNotification(lang$download$errorMessage, type = "error")            # Show popup
+        try(unlink(tmpDir, recursive = TRUE, force = TRUE), silent = TRUE)      # Remove temporary directory incl. all files.
+      },
+      finally = {
+        try(unlink(tmpDir, recursive = TRUE, force = TRUE), silent = TRUE)      # Remove temporary directory incl. all files.
+      })
     },
     contentType = NULL
   )
@@ -903,68 +932,108 @@ server <- function(input, output, session) {
   })
   
   # tabAnalyze ----
-  ## Set rv$multipleFiles ----
-  # Determine if multiple file 1's were uploaded
+  ## Set dataRaw ----
   observeEvent(input$file1, {
     req(input$file1)
-    rv$multipleFiles <- ifelse(nrow(input$file1) > 1, TRUE, FALSE)
-    if (rv$multipleFiles) {
-      updateSelectInput(session, "checkEdgeLabels", selected = "no")            # Change checkEdgeLabels to "no" when multiple files were uploaded
-      updateSelectInput(session, "checkEdgeDirection", selected = "no")         # Change checkEdgeDirection to "no" when multiple files were uploaded
+
+    # Show popup if multiple files are processed
+    if (nrow(input$file1) > 1) {
+      id <- showNotification(HTML(lang$sidebar$upload$processingMessage), type = "message", duration = 5)
+    }
+    
+    # Read file1
+    data <- readFiles(input$file1)
+    
+    # Check if the returned value is a filename (character)
+    if (is.character(data)) {
+      showNotification(paste0(lang$sidebar$upload$errorMessage, " ", data), type = "error")    # Show popup
+      rv$reset <- rv$reset + 1                                                                 # Reset app
+      req(FALSE)                                                                               # Do not continue
+    }
+    rv$dataRaw1 <- data
+
+    # Enable button
+    enable("analyzeButton")
+  })
+
+  # Upload file2
+  observeEvent(input$file2, {
+    # Read file2
+    data <- readFiles(input$file2)
+    
+    # Check if the returned value is a filename (character)
+    if (is.character(data)) {
+      showNotification(paste0(lang$sidebar$upload$errorMessage, " ", data), type = "error")    # Show popup
+      rv$reset <- rv$reset + 1                                                                 # Reset app
+      req(FALSE)                                                                               # Do not continue
+    }
+    rv$dataRaw2 <- data
+  })
+  
+  # Drawing as input
+  observeEvent(input$sourcePrimary, {
+    req(input$sourcePrimary)
+    
+    if (input$sourcePrimary == "file") {
+      # Disable button if no file1   has been uploaded
+      if (is.null(input$file1)) {
+        disable("analyzeButton")
+      }
+    } else if (input$sourcePrimary == "drawing") {
+      # Show popup if drawing has not been initialized
+      if (is.null(rv$dataDraw) || ( !is.null(rv$dataDraw) && nrow(rv$dataDraw$nodes) == 0)) {
+        showNotification(lang$sidebar$upload$noDrawingMessage, type = "warning")    # Show popup
+        updateSelectInput(session, "sourcePrimary", selected = "file")                   # Change dropdown back to "file"
+        req(FALSE)                                                                       # Do not continue    
+      } 
+      
+      # Prepare data
+      tryCatch({
+        rv$dataRaw1 <- rv$dataDraw
+        
+        # Enforce a consistent filename. Mixing uploaded and drawn parts can lead to
+        # incorrect averaging of centrality measures.
+        if (nrow(rv$dataRaw1$nodes) > 0) {
+          rv$dataRaw1$nodes$filename <- "Draw"
+        }
+        if (nrow(rv$dataRaw1$edges) > 0) {
+          rv$dataRaw1$edges$filename <- "Draw"
+        }
+        
+        # Keep manual positions
+        rv$posMap1Manual <- rv$posMapDrawManual
+      },
+      error = function(e) {
+        showNotification(lang$tabAnalyze$errorMessage, type = "error")          # Show popup
+        rv$reset <- rv$reset + 1                                                # Reset app
+        req(FALSE)                                                              # Do not continue
+      })
+
+      # Enable button
+      enable("analyzeButton")
     }
   })
   
-  ## Start analysis (analyzeFilesButton) ----
-  observeEvent(input$analyzeFilesButton, {
+  ## Start analysis (analyzeButton) ----
+  observeEvent(input$analyzeButton, {
+    req(input$analyzeButton)
+    req(rv$dataRaw1)
 
-    # File as Primary Map
-    if (input$sourcePrimary == "file") {
-      # Show popup if it has not changed
-      if (is.null(input$file1)) {
-        showModal(modalDialog(
-          title = lang$sidebar$upload$popUpNoFileTitle,
-          lang$sidebar$upload$popUpNoFileMessage,
-          easyClose = TRUE,
-          footer =  modalButton(lang$sidebar$upload$popUpNoFileButtonLabel)
-        )) 
-        
-        # Do not continue
-        req(input$file1)                                                           
-      } 
-      
-      # Determine if file1 has been uploaded
-      if (!is.null(input$file1)) {
-        rv$readFile1 <- rv$readFile1 + 1
-      }
-    }
-    
-    # Drawing as Primary Map
-    if (input$sourcePrimary == "drawing") {
-      # Show popup if drawing has not been initialized
-      if (is.null(rv$dataDraw)) {
-        showModal(modalDialog(
-          title = lang$sidebar$upload$popUpNoDrawingTitle,
-          lang$sidebar$upload$popUpNoDrawingMessage,
-          easyClose = TRUE,
-          footer =  modalButton(lang$sidebar$upload$popUpNoDrawingButtonLabel)
-        )) 
-        
-        # Do not continue
-        req(rv$dataDraw)                                                           
-      } 
-      
-      rv$retrieveDrawing <- rv$retrieveDrawing + 1
-      rv$multipleFiles <- FALSE
-    }
-    
-    # Determine if file2 has been uploaded
-    if (!is.null(input$file2)) {
-      rv$readFile2 <- rv$readFile2 + 1
+    ## Determine if Comparison Data is available
+    if (!is.null(rv$dataRaw2)) {
       rv$comparisonData  <- TRUE
     } else {
       rv$comparisonData  <- FALSE
     }
     
+    ## Determine if multiple Primary Files are available
+    rv$multipleFiles <- ifelse(length(unique(rv$dataRaw1$nodes$filename)) > 1, TRUE, FALSE)
+    if (rv$multipleFiles) {
+      updateSelectInput(session, "checkEdgeLabels", selected = "no")            # Change checkEdgeLabels to "no" when multiple files were uploaded
+      updateSelectInput(session, "checkEdgeDirection", selected = "no")         # Change checkEdgeDirection to "no" when multiple files were uploaded
+    }
+    
+    ## Prepare UI 
     # Insert Sidebar UI
     visibilitySidebarUI(input = input, rv = rv)
     
@@ -972,78 +1041,25 @@ server <- function(input, output, session) {
     removeUI("#divTextNoData",
              immediate = TRUE)
     
-    ### Insert Body UI ----
+    # Insert Body UI
     insertBodyUI(rv = rv, lang = lang)
-  })
-
-  ## Set dataRaw ----
-  observeEvent(rv$readFile1, {
-    req(input$file1)
     
-    # Read file
-    data <- readFiles(input$file1)
-    
-    # Stop if there was an error
-    if (!is.list(data)) {
-      showModal(modalDialog(
-        title = lang$sidebar$upload$popUpReadErrorTitle,
-        paste0(lang$sidebar$upload$popUpReadErrorMessage, data),
-        easyClose = TRUE,
-        footer =  modalButton(lang$sidebar$upload$popUpReadErrorButtonLabel)
-      )) 
-      
-      # Reset
-      rv$reset <- rv$reset + 1
-      
-      # Do not continue
-      req(FALSE)  
-    }
-    
-    rv$dataRaw1 <- data
-    
-    if (rv$comparisonData) {
-      # Read file
-      data <- readFiles(input$file2)
-      
-      # Stop if there was an error
-      if (!is.list(data)) {
-        showModal(modalDialog(
-          title = lang$sidebar$upload$popUpReadErrorTitle,
-          paste0(lang$sidebar$upload$popUpReadErrorMessage, data),
-          easyClose = TRUE,
-          footer =  modalButton(lang$sidebar$upload$popUpNoDataButtonLabel)
-        )) 
-        
-        # Reset
-        rv$reset <- rv$reset + 1
-        
-        # Do not continue
-        req(FALSE)  
-      }
-      
-      rv$dataRaw2 <- data
-    }
-  })
-  
-  ### Retrieve drawing ----
-  observeEvent(rv$retrieveDrawing, {
-    req(rv$retrieveDrawing > 0)
-
-    rv$dataRaw1 <- rv$dataDraw
-    rv$posMap1Manual <- rv$posMapDrawManual                                     # Keep manual positions
+    # Continue with analysis
+    rv$startAnalysis <- rv$startAnalysis + 1
   })
   
   ## Set dataMatched ----
-  observeEvent(c(rv$dataRaw1,
+  observeEvent(c(rv$startAnalysis,
                  input$matchingType, input$nodesOrEdges, input$matchDistance,
                  input$checkEdgeLabels,
                  input$checkEdgeDirection), { 
-    req(rv$dataRaw1, 
-       input$matchingType, input$nodesOrEdges, input$matchDistance,
-       input$checkEdgeLabels,
-       input$checkEdgeDirection)       
-
-    # Run in console for debugging: data1 = rv$dataRaw1; data2 = rv$dataRaw2; matchingType = input$matchingType; nodesOrEdges = input$nodesOrEdges; matchDistance = input$matchDistance; checkEdgeLabels = input$checkEdgeLabels; checkEdgeDirection = input$checkEdgeDirection
+    req(rv$startAnalysis > 0,
+        input$matchingType, input$nodesOrEdges, input$matchDistance,
+        input$checkEdgeLabels,
+        input$checkEdgeDirection)       
+    
+    tryCatch({
+     # Run in console for debugging: data1 = rv$dataRaw1; data2 = rv$dataRaw2; matchingType = input$matchingType; nodesOrEdges = input$nodesOrEdges; matchDistance = input$matchDistance; checkEdgeLabels = input$checkEdgeLabels; checkEdgeDirection = input$checkEdgeDirection
      data <- prepareDataMatched(data1 = rv$dataRaw1, data2 = rv$dataRaw2, 
                                 matchingType = input$matchingType, nodesOrEdges = input$nodesOrEdges, matchDistance = input$matchDistance,
                                 checkEdgeLabels = input$checkEdgeLabels,
@@ -1051,198 +1067,262 @@ server <- function(input, output, session) {
      
      rv$dataMatched1 <- data$data1
      rv$dataMatched2 <- data$data2
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   })
 
   
   ## Set dataAgg ----
   observeEvent(c(rv$dataMatched1), { 
-  req(rv$dataMatched1)       
+    req(rv$dataMatched1)       
   
-    rv$dataAgg1  <-rv$dataMatched1 %>%
-      prepareDataAgg() %>%
-      restructureAndFillData()
-    if (rv$comparisonData) {
-      rv$dataAgg2  <- rv$dataMatched2 %>%
+    tryCatch({
+      rv$dataAgg1 <- rv$dataMatched1 %>%
         prepareDataAgg() %>%
         restructureAndFillData()
-    }
+      if (rv$comparisonData) {
+        rv$dataAgg2 <- rv$dataMatched2 %>%
+          prepareDataAgg() %>%
+          restructureAndFillData()
+      }
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   })
   
   ## Update sliderSelectEdges ----
   observeEvent(c(rv$dataAgg1), {
     req(rv$dataAgg1)
-    data <- rv$dataAgg1
     
-    # Determine selected range in slider
-    choices <- sort(unique(data$edges$n))
-    nEdges <- nrow(data$edges)                                                  # Number of edges
-    nFiles <- nrow(input$file1)                                                 # Number of files
-    if (nEdges > 30) {
-      # If more than 30 edges are present, find the slider range that keeps the
-      # average number of edges across files
-      selected <- data$edges %>%
-        arrange(desc(n)) %>%
-        slice(1:round(nEdges / nFiles, 0)) %>% 
-        summarize(min = min(n),
-                  max = max(n)) %>%
-        as.numeric()
-    } else {
-      # If 30 or less edges are present, select all arrows
-      selected <- choices
-    }
-    
-    # Update slider
-    updateSliderTextInput(session = session, inputId = "sliderSelectEdges", 
-                          selected = c(selected[1], selected[length(selected)]), 
-                          choices = choices)
-
-    # Show slider if there are common edges
-    if (length(choices) > 1) {
-      show("divSliderSelectEdges")
-    }
+    tryCatch({
+      data <- rv$dataAgg1
+      
+      # Determine selected range in slider
+      choices <- sort(unique(data$edges$n))
+      nEdges <- nrow(data$edges)                                                # Number of edges
+      nFiles <- length(unique(rv$dataMatched1$edges$filename))                  # Number of files
+      if (nEdges > 30) {
+        # If more than 30 edges are present, find the slider range that keeps the
+        # average number of edges across files
+        selected <- data$edges %>%
+          arrange(desc(n)) %>%
+          slice(1:round(nEdges / nFiles, 0)) %>% 
+          summarize(min = min(n),
+                    max = max(n)) %>%
+          as.numeric()
+      } else {
+        # If 30 or less edges are present, select all arrows
+        selected <- choices
+      }
+      
+      # Update slider
+      updateSliderTextInput(session = session, inputId = "sliderSelectEdges", 
+                            selected = c(selected[1], selected[length(selected)]), 
+                            choices = choices)
+      
+      # Show slider if there are common edges
+      if (length(choices) > 1) {
+        show("divSliderSelectEdges")
+      }
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   })
   
   ## Set dataAggSel / dataMatchedSel ----
-  observeEvent(c(rv$dataAgg1, 
+  observeEvent(c(rv$dataAgg1,
                  input$sliderSelectEdges), {
     req(rv$dataAgg1, input$sliderSelectEdges)
      
-    # Find nodes / edges to keep
-    data <- rv$dataAgg1
-    keepEdges <- data$edges %>%
-      filter((n >= input$sliderSelectEdges[1]) & (n <= input$sliderSelectEdges[2])) %>%
-      select(id, from, to)
-    keepNodes <- unique(c(keepEdges$from, 
-                          keepEdges$to, 
-                          data$nodes[data$nodes$isIsolate == "TRUE", "id"]))    # Readd isolates
+    tryCatch({
+      # Find nodes / edges to keep
+      data <- rv$dataAgg1
+      keepEdges <- data$edges %>%
+        filter((n >= input$sliderSelectEdges[1]) & (n <= input$sliderSelectEdges[2])) %>%
+        select(id, from, to)
+      keepNodes <- unique(c(keepEdges$from, 
+                            keepEdges$to, 
+                            data$nodes[data$nodes$isIsolate == "TRUE", "id"]))    # Readd isolates
       
-    # Prepare dataMatchedSel
-    data <- rv$dataMatched1
-    data$nodes <- data$nodes %>%
-      filter(id %in% keepNodes)
-    
-    data$edges <- data$edges %>%
-      filter(id %in% keepEdges$id)
-    rv$dataMatchedSel1 <- data
-
-    # Prepare dataAggSel
-    data <- rv$dataAgg1
-    data$nodes <- data$nodes %>%
-      filter(id %in% keepNodes)
-    
-    data$edges <- data$edges %>%
-      filter(id %in% keepEdges$id)
-    rv$dataAggSel1 <- data
+      # Prepare dataMatchedSel
+      data <- rv$dataMatched1
+      data$nodes <- data$nodes %>%
+        filter(id %in% keepNodes)
+      
+      data$edges <- data$edges %>%
+        filter(id %in% keepEdges$id)
+      rv$dataMatchedSel1 <- data
+      
+      # Prepare dataAggSel
+      data <- rv$dataAgg1
+      data$nodes <- data$nodes %>%
+        filter(id %in% keepNodes)
+      
+      data$edges <- data$edges %>%
+        filter(id %in% keepEdges$id)
+      rv$dataAggSel1 <- data
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   })
 
   ## Compute centrality ----
   observeEvent(rv$dataMatchedSel1, {
     req(rv$dataAggSel1)
     
-    rv$centrality1 <- computeNetworkMeasures(data = rv$dataMatchedSel1)
-    if (rv$comparisonData) {
-      rv$centrality2 <- computeNetworkMeasures(data = rv$dataMatched2)
-    }
-      
+    tryCatch({
+      rv$centrality1 <- computeNetworkMeasures(data = rv$dataMatchedSel1)
+      if (rv$comparisonData) {
+        rv$centrality2 <- computeNetworkMeasures(data = rv$dataMatched2)
+      }
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   })
   
   ## Update sliderCentrality / sliderEdges ----
   observeEvent(c(rv$centrality1, input$centralityMeasure), {
     req(rv$centrality1, input$centralityMeasure)
 
-    choices <- sort(unique(rv$centrality1[[input$centralityMeasure]]$val))
-    updateSliderTextInput(session = session, inputId = "sliderCentrality1", 
-                          selected = c(choices[1], choices[length(choices)]), 
-                          choices = choices)
-    if (length(choices) > 1) {
-      show("divSliderCentrality1")
-    }
-
-    choices <- sort(unique(rv$dataAggSel1$edges$n))
-    updateSliderTextInput(session = session, inputId = "sliderEdges1", 
-                          selected = c(choices[1], choices[length(choices)]), 
-                          choices = choices)
-    if (length(choices) > 1) {
-      show("divSliderEdges1")
-    }
-    
-    if (rv$comparisonData) {
-      choices <- sort(unique(rv$centrality2[[input$centralityMeasure]]$val))
-      updateSliderTextInput(session = session, inputId = "sliderCentrality2", 
+    tryCatch({
+      choices <- sort(unique(rv$centrality1[[input$centralityMeasure]]$val))
+      updateSliderTextInput(session = session, inputId = "sliderCentrality1", 
                             selected = c(choices[1], choices[length(choices)]), 
                             choices = choices)
       if (length(choices) > 1) {
-        show("divSliderCentrality2")
+        show("divSliderCentrality1")
       }
       
-      choices <- sort(unique(rv$dataAgg2$edges$n))
-      updateSliderTextInput(session = session, inputId = "sliderEdges2", 
+      choices <- sort(unique(rv$dataAggSel1$edges$n))
+      updateSliderTextInput(session = session, inputId = "sliderEdges1", 
                             selected = c(choices[1], choices[length(choices)]), 
                             choices = choices)
       if (length(choices) > 1) {
-        show("divSliderEdges2")
+        show("divSliderEdges1")
       }
       
-    }
+      if (rv$comparisonData) {
+        choices <- sort(unique(rv$centrality2[[input$centralityMeasure]]$val))
+        updateSliderTextInput(session = session, inputId = "sliderCentrality2", 
+                              selected = c(choices[1], choices[length(choices)]), 
+                              choices = choices)
+        if (length(choices) > 1) {
+          show("divSliderCentrality2")
+        }
+        
+        choices <- sort(unique(rv$dataAgg2$edges$n))
+        updateSliderTextInput(session = session, inputId = "sliderEdges2", 
+                              selected = c(choices[1], choices[length(choices)]), 
+                              choices = choices)
+        if (length(choices) > 1) {
+          show("divSliderEdges2")
+        }
+      }
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   }, priority = 9999)                                                           # Update sliders before plot
   
   ## Set dataMap ----
   observeEvent(c(rv$dataAggSel1), {
     req(rv$dataAggSel1)
     
-    data <- rv$dataAggSel1 %>%
-      restructureAndFillData() %>%
-      prepareDataMap(data2 = rv$dataAgg2, 
-                     centrality = rv$centrality1[[input$centralityMeasure]])
-    rv$dataMap1 <- data
-    
-    if (rv$comparisonData) {
-      data <- rv$dataAgg2 %>%
+    tryCatch({
+      data <- rv$dataAggSel1 %>%
         restructureAndFillData() %>%
-        prepareDataMap(data2 = rv$dataAggSel1, 
-                       centrality = rv$centrality2[[input$centralityMeasure]])
-      rv$dataMap2 <- data
-    }
-
+        prepareDataMap(data2 = rv$dataAgg2, 
+                       centrality = rv$centrality1[[input$centralityMeasure]])
+      rv$dataMap1 <- data
+      
+      if (rv$comparisonData) {
+        data <- rv$dataAgg2 %>%
+          restructureAndFillData() %>%
+          prepareDataMap(data2 = rv$dataAggSel1, 
+                         centrality = rv$centrality2[[input$centralityMeasure]])
+        rv$dataMap2 <- data
+      }
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   }) 
   
   ## Draw plotMap1 ----
   output$plotMap1 <- renderVisNetwork({
     req(rv$dataMap1)
-    data <- rv$dataMap1
     
-    # Add node positions for manual layout
-    if (input$layoutAnalyze == "manual") {
-      if (is.null(rv$posMap1Manual)) {
-        data$nodes <- addPositions(data = data$nodes, pos = rv$posMap1Current)
-      } else {
-        data$nodes <- addPositions(data = data$nodes, pos = rv$posMap1Manual)
+    tryCatch({
+      data <- rv$dataMap1
+      
+      # Add node positions for manual layout
+      if (input$layoutAnalyze == "manual") {
+        if (is.null(rv$posMap1Manual)) {
+          data$nodes <- addPositions(data = data$nodes, pos = rv$posMap1Current)
+        } else {
+          data$nodes <- addPositions(data = data$nodes, pos = rv$posMap1Manual)
+        }
       }
-    }
-    
-    # Plot
-    networkPlot(nodes = data$nodes, edges = data$edges, 
-                layout = input$layoutAnalyze, randomSeed = input$randomSeedAnalyze)
+      
+      # Plot
+      networkPlot(nodes = data$nodes, edges = data$edges, 
+                  layout = input$layoutAnalyze, randomSeed = input$randomSeedAnalyze)
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
+
   }) %>%
     bindEvent(rv$dataMap1, input$layoutAnalyze, input$randomSeedAnalyze)
   
   ## Draw plotMap2 ----
   output$plotMap2 <- renderVisNetwork({
     req(rv$dataMap2)
-    data <- rv$dataMap2
-
-    # Add node positions for manual layout
-    if (input$layoutAnalyze == "manual") {
-      if (is.null(rv$posMap2Manual)) {
-        data$nodes <- addPositions(data = data$nodes, pos = rv$posMap2Current)
-      } else {
-        data$nodes <- addPositions(data = data$nodes, pos = rv$posMap2Manual)
-      }
-    }
     
-    # Plot
-    networkPlot(nodes = data$nodes, edges = data$edges, 
-                layout = input$layoutAnalyze, randomSeed = input$randomSeedAnalyze)
+    tryCatch({
+      data <- rv$dataMap2
+      
+      # Add node positions for manual layout
+      if (input$layoutAnalyze == "manual") {
+        if (is.null(rv$posMap2Manual)) {
+          data$nodes <- addPositions(data = data$nodes, pos = rv$posMap2Current)
+        } else {
+          data$nodes <- addPositions(data = data$nodes, pos = rv$posMap2Manual)
+        }
+      }
+      
+      # Plot
+      networkPlot(nodes = data$nodes, edges = data$edges, 
+                  layout = input$layoutAnalyze, randomSeed = input$randomSeedAnalyze)
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
+
   }) %>%
     bindEvent(rv$dataMap2, input$layoutAnalyze, input$randomSeedAnalyze)
   
@@ -1254,91 +1334,138 @@ server <- function(input, output, session) {
         input$centralityMeasure,
         input$sliderCentrality1,
         input$sliderEdges1)
-    data <- rv$dataMap1 
-    
-    # Update centrality (size)
-    data <- prepareDataMap(data1 = data, data2 = rv$dataMap2, 
-                           centrality = rv$centrality1[[input$centralityMeasure]]) 
-  
-    # Update displayed nodes / edges
-    data <- prepareDataMapSel(data = data, 
-                              sliderCentrality = input$sliderCentrality1,
-                              sliderEdges = input$sliderEdges1) 
+
+    tryCatch({
+      data <- rv$dataMap1 
       
-    # Update plot
-    visNetworkProxy("plotMap1") %>%
-      visUpdateNodes(data$nodes) %>%
-      visUpdateEdges(data$edges)
-    
-    rv$dataMapSel1 <- data                                                      # Stored for easier export
+      # Update centrality (size)
+      data <- prepareDataMap(data1 = data, data2 = rv$dataMap2, 
+                             centrality = rv$centrality1[[input$centralityMeasure]]) 
+      
+      # Update displayed nodes / edges
+      data <- prepareDataMapSel(data = data, 
+                                sliderCentrality = input$sliderCentrality1,
+                                sliderEdges = input$sliderEdges1) 
+      
+      # Update plot
+      visNetworkProxy("plotMap1") %>%
+        visUpdateNodes(data$nodes) %>%
+        visUpdateEdges(data$edges)
+      
+      rv$dataMapSel1 <- data                                                    # Stored for easier export
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
+
   }, priority = 8888)
 
   ## Update plotMap2 ----
   observeEvent(c(input$sliderCentrality2,
                  input$sliderEdges2), { 
-   req(rv$dataMap2,
+    req(rv$dataMap2,
        input$centralityMeasure,
        input$sliderCentrality2,
        input$sliderEdges2)
-   data <- rv$dataMap2 
-   
-   # Update centrality (size)
-   data <- prepareDataMap(data1 = data, data2 = rv$dataMap1, 
-                          centrality = rv$centrality2[[input$centralityMeasure]]) 
+                   
+    tryCatch({
+     
+     data <- rv$dataMap2 
+     
+     # Update centrality (size)
+     data <- prepareDataMap(data1 = data, data2 = rv$dataMap1, 
+                            centrality = rv$centrality2[[input$centralityMeasure]]) 
+     
+     # Update displayed nodes / edges
+     data <- prepareDataMapSel(data = data, 
+                               sliderCentrality = input$sliderCentrality2, 
+                               sliderEdges = input$sliderEdges2)
+     
+     # Update plot
+     visNetworkProxy("plotMap2") %>%
+       visUpdateNodes(data$nodes) %>%
+       visUpdateEdges(data$edges)
+     
+     rv$dataMapSel2 <- data                                                     # Stored for easier export
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
 
-   # Update displayed nodes / edges
-   data <- prepareDataMapSel(data = data, 
-                             sliderCentrality = input$sliderCentrality2, 
-                             sliderEdges = input$sliderEdges2)
-   
-   # Update plot
-   visNetworkProxy("plotMap2") %>%
-     visUpdateNodes(data$nodes) %>%
-     visUpdateEdges(data$edges)
-   
-   rv$dataMapSel2 <- data                                                       # Stored for easier export
   })
   
   ## Get posMap1Current / posMap1Manual ----
   observe({
-    # Positions are continuously retrieved
-    invalidateLater(1000, session)
-    visNetworkProxy("plotMap1") %>%
-      visGetPositions()
+    tryCatch({
+      # Positions are continuously retrieved
+      invalidateLater(1000, session)
+      visNetworkProxy("plotMap1") %>%
+        visGetPositions()
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   })
   
   observeEvent(c(input$plotMap1_positions), {
-    pos <- as.data.frame(t(sapply(input$plotMap1_positions,unlist))) %>%
-      rownames_to_column(var = "id") %>%
-      mutate(x = ifelse(is.na(x), min(x, na.rm = TRUE), x),
-             y = ifelse(is.na(y), min(y, na.rm = TRUE), y))
-
-    # Save node positions
-    rv$posMap1Current <- pos
-    if (input$layoutAnalyze == "manual") {
-      rv$posMap1Manual <- pos
-    }
+    tryCatch({
+      pos <- as.data.frame(t(sapply(input$plotMap1_positions,unlist))) %>%
+        rownames_to_column(var = "id") %>%
+        mutate(x = ifelse(is.na(x), min(x, na.rm = TRUE), x),
+               y = ifelse(is.na(y), min(y, na.rm = TRUE), y))
+      
+      # Save node positions
+      rv$posMap1Current <- pos
+      if (input$layoutAnalyze == "manual") {
+        rv$posMap1Manual <- pos
+      }
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   })
 
   ## Get posMap2Current / posMap2Manual ----
   observe({
-    # Positions are continuously retrieved
-    invalidateLater(1000, session)
-    visNetworkProxy("plotMap2") %>%
-      visGetPositions()
+    tryCatch({
+      # Positions are continuously retrieved
+      invalidateLater(1000, session)
+      visNetworkProxy("plotMap2") %>%
+        visGetPositions()
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   })
 
   observeEvent(c(input$plotMap2_positions), {
-    pos <- as.data.frame(t(sapply(input$plotMap2_positions,unlist))) %>%
-      rownames_to_column(var = "id") %>%
-      mutate(x = ifelse(is.na(x), min(x, na.rm = TRUE), x),
-             y = ifelse(is.na(y), min(y, na.rm = TRUE), y))
-
-    # Save node positions
-    rv$posMap2Current <- pos
-    if (input$layoutAnalyze == "manual") {
-      rv$posMap2Manual <- pos
-    }
+    tryCatch({
+      pos <- as.data.frame(t(sapply(input$plotMap2_positions,unlist))) %>%
+        rownames_to_column(var = "id") %>%
+        mutate(x = ifelse(is.na(x), min(x, na.rm = TRUE), x),
+               y = ifelse(is.na(y), min(y, na.rm = TRUE), y))
+      
+      # Save node positions
+      rv$posMap2Current <- pos
+      if (input$layoutAnalyze == "manual") {
+        rv$posMap2Manual <- pos
+      }
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   })
 
   
@@ -1346,70 +1473,78 @@ server <- function(input, output, session) {
   observeEvent(c(rv$centrality1, rv$centrality2), {
     req(rv$centrality1)
     
-    # Prepare strings for boxes
-    if (is.null(rv$centrality2)) {
-      nodes <- rv$centrality1$nodes
-      isolates <- rv$centrality1$isolates
-      edges <- rv$centrality1$edges
-      density <- rv$centrality1$density
-    } else {
-      nodes <- paste0(rv$centrality1$nodes, " / ", rv$centrality2$nodes)
-      isolates <- paste0(rv$centrality1$isolates, " / ", rv$centrality2$isolates)
-      edges <- paste0(rv$centrality1$edges, " / ", rv$centrality2$edges)
-      density <- paste0(rv$centrality1$density, " / ", rv$centrality2$density)
-    }
-    
-    # Remove old boxes
-    removeUI("#rowBoxes", immediate = TRUE)
-    removeUI("#boxNodes", immediate = TRUE)
-    removeUI("#boxIsolates", immediate = TRUE)
-    removeUI("#boxEdges", immediate = TRUE)
-    removeUI("#boxDensity", immediate = TRUE)
-    
-    # Insert new boxes
-    insertUI(
-      selector = "#shiny-tab-tabAnalyze",
-      where = "afterBegin",
-      immediate = TRUE,
-      ui = fluidRow(id = "rowBoxes",
-                    div(id = "boxNodes", 
-                        tipify(
-                          valueBox(nodes, 
-                                   lang$tabAnalyze$boxNodes$title,
-                                   color = "aqua", width = 3),
-                          title = lang$tabAnalyze$boxNodes$tooltip, 
-                          placement = "bottom"
-                        )
-                    ),
-                    div(id = "boxIsolates", 
-                        tipify(
-                          valueBox(isolates, 
-                                   lang$tabAnalyze$boxIsolates$title,
-                                   color = "purple", width = 3),
-                          title = lang$tabAnalyze$boxIsolates$tooltip, 
-                          placement = "bottom"
-                        )
-                    ),
-                    div(id = "boxEdges", 
-                        tipify(
-                          valueBox(edges, 
-                                   lang$tabAnalyze$boxEdges$title,
-                                   color = "yellow", width = 3),
-                          title = lang$tabAnalyze$boxEdges$tooltip,
-                          placement = "bottom"
-                        )
-                    ),
-                    div(id = "boxDensity", 
-                        tipify(
-                          valueBox(density, 
-                                   lang$tabAnalyze$boxDensity$title,
-                                   color = "olive", width = 3),
-                          title = lang$tabAnalyze$boxDensity$tooltip, 
-                          placement = "bottom"
-                        )
-                    )
+    tryCatch({
+      # Prepare strings for boxes
+      if (is.null(rv$centrality2)) {
+        nodes <- rv$centrality1$nodes
+        isolates <- rv$centrality1$isolates
+        edges <- rv$centrality1$edges
+        density <- rv$centrality1$density
+      } else {
+        nodes <- paste0(rv$centrality1$nodes, " / ", rv$centrality2$nodes)
+        isolates <- paste0(rv$centrality1$isolates, " / ", rv$centrality2$isolates)
+        edges <- paste0(rv$centrality1$edges, " / ", rv$centrality2$edges)
+        density <- paste0(rv$centrality1$density, " / ", rv$centrality2$density)
+      }
+      
+      # Remove old boxes
+      removeUI("#rowBoxes", immediate = TRUE)
+      removeUI("#boxNodes", immediate = TRUE)
+      removeUI("#boxIsolates", immediate = TRUE)
+      removeUI("#boxEdges", immediate = TRUE)
+      removeUI("#boxDensity", immediate = TRUE)
+      
+      # Insert new boxes
+      insertUI(
+        selector = "#shiny-tab-tabAnalyze",
+        where = "afterBegin",
+        immediate = TRUE,
+        ui = fluidRow(id = "rowBoxes",
+                      div(id = "boxNodes", 
+                          tipify(
+                            valueBox(nodes, 
+                                     lang$tabAnalyze$boxNodes$title,
+                                     color = "aqua", width = 3),
+                            title = lang$tabAnalyze$boxNodes$tooltip, 
+                            placement = "bottom"
+                          )
+                      ),
+                      div(id = "boxIsolates", 
+                          tipify(
+                            valueBox(isolates, 
+                                     lang$tabAnalyze$boxIsolates$title,
+                                     color = "purple", width = 3),
+                            title = lang$tabAnalyze$boxIsolates$tooltip, 
+                            placement = "bottom"
+                          )
+                      ),
+                      div(id = "boxEdges", 
+                          tipify(
+                            valueBox(edges, 
+                                     lang$tabAnalyze$boxEdges$title,
+                                     color = "yellow", width = 3),
+                            title = lang$tabAnalyze$boxEdges$tooltip,
+                            placement = "bottom"
+                          )
+                      ),
+                      div(id = "boxDensity", 
+                          tipify(
+                            valueBox(density, 
+                                     lang$tabAnalyze$boxDensity$title,
+                                     color = "olive", width = 3),
+                            title = lang$tabAnalyze$boxDensity$tooltip, 
+                            placement = "bottom"
+                          )
+                      )
+        )
       )
-    )
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
+
   })
   
   ## Show tblCentrality ----
@@ -1418,10 +1553,18 @@ server <- function(input, output, session) {
     if (rv$comparisonData) {
       req(rv$centrality2)
     }
-    tblCentrality <- prepareTblCentrality(centrality1 = rv$centrality1, centrality2 = rv$centrality2, 
-                                          centralityMeasure = input$centralityMeasure, 
-                                          lang = lang, comparisonData = rv$comparisonData)
-    tblCentrality$reactable
+    
+    tryCatch({
+      tblCentrality <- prepareTblCentrality(centrality1 = rv$centrality1, centrality2 = rv$centrality2, 
+                                            centralityMeasure = input$centralityMeasure, 
+                                            lang = lang, comparisonData = rv$comparisonData)
+      tblCentrality$reactable
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   }) %>%
     bindEvent(rv$dataMap1)
   
@@ -1431,182 +1574,212 @@ server <- function(input, output, session) {
     if (rv$comparisonData) {
       req(rv$dataMatched2)
     }
-    tblFile <- prepareTblFile(data1 = rv$dataMatchedSel1, data2 = rv$dataMatched2, 
-                              lang = lang, comparisonData = rv$comparisonData)
-    tblFile$reactable
+    
+    tryCatch({
+      tblFile <- prepareTblFile(data1 = rv$dataMatchedSel1, data2 = rv$dataMatched2, 
+                                lang = lang, comparisonData = rv$comparisonData)
+      tblFile$reactable
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   }) %>%
     bindEvent(rv$dataMap1)
   
   ## Show tblNode ----
   output$tblNode = renderReactable({
     req(rv$dataMap1)
-    tblNode <- prepareTblNode(data = rv$dataMap1, 
-                              lang = lang, comparisonData = rv$comparisonData)
-    tblNode$reactable
+    
+    tryCatch({
+      tblNode <- prepareTblNode(data = rv$dataMap1, 
+                                lang = lang, comparisonData = rv$comparisonData)
+      tblNode$reactable
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   }) %>%
     bindEvent(rv$dataMap1)
   
   ## Show tblEdge ----
   output$tblEdge = renderReactable({
     req(rv$dataMap1)
-    tblEdge <- prepareTblEdge(data = rv$dataMap1, 
-                              lang = lang, comparisonData = rv$comparisonData)
-    tblEdge$reactable
+    
+    tryCatch({
+      tblEdge <- prepareTblEdge(data = rv$dataMap1, 
+                                lang = lang, comparisonData = rv$comparisonData)
+      tblEdge$reactable
+    },
+    error = function(e) {
+      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      rv$reset <- rv$reset + 1                                                  # Reset app
+      req(FALSE)                                                                # Do not continue
+    })
   }) %>%
     bindEvent(rv$dataMap1)
   
   ## Download (downloadButtonAnalyze) ----
   output$downloadButtonAnalyze <- downloadHandler(
       filename = function() { rv$files <- prepareFilenames(selection = input$downloadListAnalyze, comparison = rv$comparisonData, basepath = tmpDir, lang = lang)
-                              basename(rv$files$returned) # Remove path
+                              basename(rv$files$returned)                       # Remove path
     },
     content = function(file) {   
-      
-      # Create temporary directory
-      dir.create(tmpDir, showWarnings = FALSE, recursive = TRUE)
-      
-      # Prepare data
-      nodes1 <- rv$dataMapSel1$nodes %>%
-        mutate(x = rv$posMap1Current$x,
-               y = rv$posMap1Current$y)
-      edges1 <- rv$dataMapSel1$edges
-      
-      if (rv$comparisonData) {
-        nodes2 <- rv$dataMap2$nodes %>%
-          mutate(x = rv$posMap2Current$x,
-                 y = rv$posMap2Current$y)
-        edges2 <- rv$dataMap2$edges
-      }
-      
-      # cxl
-      if ("cxl" %in% names(rv$files)) {
-        writeCXL(nodes = nodes1, edges = edges1, file = rv$files$cxl)
-      }
-      
-      if ("cxlPrimary" %in% names(rv$files)) {
-        writeCXL(nodes = nodes1, edges = edges1, file = rv$files$cxlPrimary)
-      }
-      
-      if ("cxlComparison" %in% names(rv$files)) {
-        writeCXL(nodes = nodes2, edges = edges2, file = rv$files$cxlComparison)
-      }
-      
-      # xlsx
-      if ("xlsxEdgeList" %in% names(rv$files)) {
-        writeXlsxEdgeList(nodes = nodes1, edges = edges1, file = rv$files$xlsxEdgeList)
-      }
-      
-      if ("xlsxEdgeListPrimary" %in% names(rv$files)) {
-        writeXlsxEdgeList(nodes = nodes1, edges = edges1, file = rv$files$xlsxEdgeListPrimary)
-      }
-      
-      if ("xlsxEdgeListComparison" %in% names(rv$files)) {
-        writeXlsxEdgeList(nodes = nodes2, edges = edges2, file = rv$files$xlsxEdgeListComparison)
-      }
-      
-      # png
-      if ("png" %in% names(rv$files)) {
-        graphPlot <- saveNetworkPlot(nodes = nodes1, edges = edges1, file = rv$files$png)
-      }
-      
-      if ("pngPrimary" %in% names(rv$files)) {
-        graphPlot <- saveNetworkPlot(nodes = nodes1, edges = edges1, file = rv$files$pngPrimary)
-      }
- 
-      if ("pngComparison" %in% names(rv$files)) {
-        graphPlot <- saveNetworkPlot(nodes = nodes2, edges = edges2, file = rv$files$pngComparison)
-      }
-      
-      # svg
-      if ("svg" %in% names(rv$files)) {
-        graphPlot <- saveNetworkPlot(nodes = nodes1, edges = edges1, file = rv$files$svg)
-      }
-      
-      if ("svgPrimary" %in% names(rv$files)) {
-        graphPlot <- saveNetworkPlot(nodes = nodes1, edges = edges1, file = rv$files$svgPrimary)
-      }
-
-      if ("svgComparison" %in% names(rv$files)) {
-        graphPlot <- saveNetworkPlot(nodes = nodes2, edges = edges2, file = rv$files$svgComparison)
-      }
-
-      # Analyses
-      if ("xlsxAnalyses" %in% names(rv$files)) {
-        # Prepare tblMatched
-        tblMatched1 <- prepareTblMatched(data = rv$dataMatchedSel1, lang = lang)
-
-        tblMatched2 <- NULL
+      tryCatch({
+        # Create temporary directory
+        dir.create(tmpDir, showWarnings = FALSE, recursive = TRUE)
+        
+        # Prepare data
+        nodes1 <- rv$dataMapSel1$nodes %>%
+          mutate(x = rv$posMap1Current$x,
+                 y = rv$posMap1Current$y)
+        edges1 <- rv$dataMapSel1$edges
+        
         if (rv$comparisonData) {
-          tblMatched2 <- prepareTblMatched(data = rv$dataMatched2, lang = lang)
+          nodes2 <- rv$dataMap2$nodes %>%
+            mutate(x = rv$posMap2Current$x,
+                   y = rv$posMap2Current$y)
+          edges2 <- rv$dataMap2$edges
         }
         
-        # Prepare tblBoxes
-        tblBoxes <- prepareTblBoxes(centrality1 = rv$centrality1, centrality2 = rv$centrality2, 
+        # cxl
+        if ("cxl" %in% names(rv$files)) {
+          writeCXL(nodes = nodes1, edges = edges1, file = rv$files$cxl)
+        }
+        
+        if ("cxlPrimary" %in% names(rv$files)) {
+          writeCXL(nodes = nodes1, edges = edges1, file = rv$files$cxlPrimary)
+        }
+        
+        if ("cxlComparison" %in% names(rv$files)) {
+          writeCXL(nodes = nodes2, edges = edges2, file = rv$files$cxlComparison)
+        }
+        
+        # xlsx
+        if ("xlsxEdgeList" %in% names(rv$files)) {
+          writeXlsxEdgeList(nodes = nodes1, edges = edges1, file = rv$files$xlsxEdgeList)
+        }
+        
+        if ("xlsxEdgeListPrimary" %in% names(rv$files)) {
+          writeXlsxEdgeList(nodes = nodes1, edges = edges1, file = rv$files$xlsxEdgeListPrimary)
+        }
+        
+        if ("xlsxEdgeListComparison" %in% names(rv$files)) {
+          writeXlsxEdgeList(nodes = nodes2, edges = edges2, file = rv$files$xlsxEdgeListComparison)
+        }
+        
+        # png
+        if ("png" %in% names(rv$files)) {
+          graphPlot <- saveNetworkPlot(nodes = nodes1, edges = edges1, file = rv$files$png)
+        }
+        
+        if ("pngPrimary" %in% names(rv$files)) {
+          graphPlot <- saveNetworkPlot(nodes = nodes1, edges = edges1, file = rv$files$pngPrimary)
+        }
+        
+        if ("pngComparison" %in% names(rv$files)) {
+          graphPlot <- saveNetworkPlot(nodes = nodes2, edges = edges2, file = rv$files$pngComparison)
+        }
+        
+        # svg
+        if ("svg" %in% names(rv$files)) {
+          graphPlot <- saveNetworkPlot(nodes = nodes1, edges = edges1, file = rv$files$svg)
+        }
+        
+        if ("svgPrimary" %in% names(rv$files)) {
+          graphPlot <- saveNetworkPlot(nodes = nodes1, edges = edges1, file = rv$files$svgPrimary)
+        }
+        
+        if ("svgComparison" %in% names(rv$files)) {
+          graphPlot <- saveNetworkPlot(nodes = nodes2, edges = edges2, file = rv$files$svgComparison)
+        }
+        
+        # Analyses
+        if ("xlsxAnalyses" %in% names(rv$files)) {
+          # Prepare tblMatched
+          tblMatched1 <- prepareTblMatched(data = rv$dataMatchedSel1, lang = lang)
+          
+          tblMatched2 <- NULL
+          if (rv$comparisonData) {
+            tblMatched2 <- prepareTblMatched(data = rv$dataMatched2, lang = lang)
+          }
+          
+          # Prepare tblBoxes
+          tblBoxes <- prepareTblBoxes(centrality1 = rv$centrality1, centrality2 = rv$centrality2, 
+                                      lang = lang, comparisonData = rv$comparisonData)
+          
+          # Prepare tblCentrality
+          tblCentrality <- prepareTblCentrality(centrality1 = rv$centrality1, centrality2 = rv$centrality2, 
+                                                centralityMeasure = input$centralityMeasure, lang = lang, comparisonData = rv$comparisonData)
+          
+          # Prepare tblFile
+          tblFile <- prepareTblFile(data1 = rv$dataMatchedSel1, data2 = rv$dataMatched2, 
                                     lang = lang, comparisonData = rv$comparisonData)
-        
-        # Prepare tblCentrality
-        tblCentrality <- prepareTblCentrality(centrality1 = rv$centrality1, centrality2 = rv$centrality2, 
-                                              centralityMeasure = input$centralityMeasure, lang = lang, comparisonData = rv$comparisonData)
-
-        # Prepare tblFile
-        tblFile <- prepareTblFile(data1 = rv$dataMatchedSel1, data2 = rv$dataMatched2, 
-                                  lang = lang, comparisonData = rv$comparisonData)
-        
-        # Prepare tblNode
-        tblNode <- prepareTblNode(data = rv$dataMap1, 
-                                  lang = lang, comparisonData = rv$comparisonData)
-        
-        # Prepare tblEdge
-        tblEdge <- prepareTblEdge(data = rv$dataMap1, 
-                                 lang = lang, comparisonData = rv$comparisonData)
-        
-        # Prepare sheets
-        x <- list("A" = tblMatched1,
-                  "B" = tblMatched2,
-                  "C" = tblBoxes,
-                  "D" = tblCentrality$excel,
-                  "E" = tblFile$excel,
-                  "F" = tblNode$excel,
-                  "G" = tblFile$excel)
-        x <- setNames(x, c(lang$download$files$sheetPrimary,
-                           lang$download$files$sheetComparison,
-                           lang$download$files$sheetBoxValues,
-                           lang$download$files$sheetCentrality,
-                           lang$download$files$sheetFiles,
-                           lang$download$files$sheetNodes,
-                           lang$download$files$sheetEdges
-                           )
-                      ) 
-        if ((rv$multipleFiles == FALSE) & (rv$comparisonData == FALSE)) {
-          x <- x[c(1, 3, 4)]
-        } else if ((rv$multipleFiles == FALSE) & (rv$comparisonData == TRUE)) {
-          x <- x[c(1, 2, 3, 4)]
-        } else if ((rv$multipleFiles == TRUE) & (rv$comparisonData == FALSE)) {
-          x <- x[c(1, 3, 4, 5, 6, 7)]
-        } else if ((rv$multipleFiles == TRUE) & (rv$comparisonData == TRUE)) {
-          x <- x[c(1, 2, 3, 4, 5, 6, 7)]
+          
+          # Prepare tblNode
+          tblNode <- prepareTblNode(data = rv$dataMap1, 
+                                    lang = lang, comparisonData = rv$comparisonData)
+          
+          # Prepare tblEdge
+          tblEdge <- prepareTblEdge(data = rv$dataMap1, 
+                                    lang = lang, comparisonData = rv$comparisonData)
+          
+          # Prepare sheets
+          x <- list("A" = tblMatched1,
+                    "B" = tblMatched2,
+                    "C" = tblBoxes,
+                    "D" = tblCentrality$excel,
+                    "E" = tblFile$excel,
+                    "F" = tblNode$excel,
+                    "G" = tblFile$excel)
+          x <- setNames(x, c(lang$download$files$sheetPrimary,
+                             lang$download$files$sheetComparison,
+                             lang$download$files$sheetBoxValues,
+                             lang$download$files$sheetCentrality,
+                             lang$download$files$sheetFiles,
+                             lang$download$files$sheetNodes,
+                             lang$download$files$sheetEdges
+          )
+          ) 
+          if ((rv$multipleFiles == FALSE) & (rv$comparisonData == FALSE)) {
+            x <- x[c(1, 3, 4)]
+          } else if ((rv$multipleFiles == FALSE) & (rv$comparisonData == TRUE)) {
+            x <- x[c(1, 2, 3, 4)]
+          } else if ((rv$multipleFiles == TRUE) & (rv$comparisonData == FALSE)) {
+            x <- x[c(1, 3, 4, 5, 6, 7)]
+          } else if ((rv$multipleFiles == TRUE) & (rv$comparisonData == TRUE)) {
+            x <- x[c(1, 2, 3, 4, 5, 6, 7)]
+          }
+          
+          # Write file
+          write_xlsx(x, 
+                     path = rv$files$xlsxAnalyses,
+                     format_headers = FALSE)
         }
         
-        # Write file
-        write_xlsx(x, 
-                   path = rv$files$xlsxAnalyses,
-                   format_headers = FALSE)
-      }
-      
-      # --- zip ---
-      if (length(input$downloadListAnalyze) > 1) {
-        zip(rv$files$returned, files = unlist( rv$files[ names(rv$files)[ names(rv$files) != "returned"]] ), extras = '-j')
-      }
-      
-      # --- Copy created file to the expected 'file' location ---
-      file.copy(rv$files$returned, file)
-      
-      # Remove temporary directory incl. all files
-      unlink(tmpDir, recursive = TRUE, force = TRUE)
+        # --- zip ---
+        if (length(input$downloadListAnalyze) > 1) {
+          zip(rv$files$returned, files = unlist( rv$files[ names(rv$files)[ names(rv$files) != "returned"]] ), extras = '-j')
+        }
+        
+        
+        # --- Copy created file to the expected 'file' location ---
+        file.copy(rv$files$returned, file)
+      },
+      error = function(e) {
+        write("", file = file)                                                  # Write empty file
+        showNotification(lang$download$errorMessage, type = "error")            # Show popup
+        try(unlink(tmpDir, recursive = TRUE, force = TRUE), silent = TRUE)      # Remove temporary directory incl. all files.
+      },
+      finally = {
+        try(unlink(tmpDir, recursive = TRUE, force = TRUE), silent = TRUE)      # Remove temporary directory incl. all files.
+      })
     },
     contentType = NULL
   )
-  
   
   ## Change data (changeDataButton) ----
   observeEvent(input$changeDataButton, {
@@ -1622,12 +1795,8 @@ server <- function(input, output, session) {
     rv$multipleFiles = NULL
     rv$comparisonData = NULL
     
-    rv$readFile1 = 0
-    rv$readFile2 = 0
-    rv$retrieveDrawing = 0
     rv$initPlotMapDraw = 0
-    
-    rv$dataDraw = NULL
+    rv$startAnalysis = 0
     
     rv$dataRaw1 = NULL
     rv$dataMatched1 = NULL
@@ -1646,8 +1815,6 @@ server <- function(input, output, session) {
     rv$centrality1 = NULL
     rv$centrality2 = NULL
     
-    rv$posMapDrawCurrent = NULL
-    rv$posMapDrawManual = NULL
     rv$posMap1Current = NULL
     rv$posMap1Manual = NULL
     rv$posMap2Current = NULL    
