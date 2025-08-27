@@ -48,7 +48,17 @@ ui <- dashboardPage(
     # Set up shinyjs
     useShinyjs(),
     width = 268,
+
+    # Hide wrapper scrollbar
+    shiny::tags$style(
+      shiny::HTML(".wrapper {scrollbar-width: none;}")
+    ),
     
+    # Add scrollbar to centrality box
+    shiny::tags$style(
+      shiny::HTML("#boxCentrality {overflow-y: scroll}")
+    ),
+
     # Make download button font black
     # https://stackoverflow.com/questions/36314780/shinydashboard-grayed-out-downloadbutton
     tags$style(
@@ -85,7 +95,7 @@ ui <- dashboardPage(
         .content {
           padding-bottom: 50px; /* Space for the footer */
         }
-        
+
         .footer-row {
           position: fixed;
           bottom: 0;
@@ -96,10 +106,37 @@ ui <- dashboardPage(
           padding: 10px;
           background-color: rgb(236, 240, 245); /* Match footer background to page. Must be changed when changing themes. */
         }
-        
+
         .footer-row p {
           margin: 0px;
         }
+    ")),
+    
+    # Network plots fill the boxes
+    tags$style(HTML("
+      #tabDraw, #tabAnalyze {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      
+      #drawBox, #boxMap1, #boxMap2 {
+        flex-grow: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      
+      #plotMapDraw, #plotMap1, #plotMap2 {
+        flex-grow: 1;
+        padding: 10px;
+      }
+    ")),
+    
+    # Remove focus outline around plots
+    tags$style(HTML("
+      .vis-network:focus {
+          outline: none;
+      }
     ")),
     
     # Style the popups in drawing
@@ -219,13 +256,6 @@ ui <- dashboardPage(
 
       window.addEventListener('resize', centerPopUp);                           // Re-center on window resize
       document.addEventListener('DOMContentLoaded', centerPopUp);               // Center on load
-    ")),
-    
-    # Remove focus outline around plots
-    tags$style(HTML("
-      .vis-network:focus {
-          outline: none;
-      }
     ")),
     
     # Set defaults, min, max and step values of inputs in drawing
@@ -384,7 +414,7 @@ ui <- dashboardPage(
       tabItem(tabName = "tabWelcome",
               HTML(lang$tabWelcome$title),
               fluidRow(
-                box(class = "infoBox", width = 12, solidHeader = TRUE,
+                box(class = "infoBox", width = 12, height = "calc(100vh - 199px)", solidHeader = TRUE, 
                     HTML(lang$tabWelcome$text)
                 )
               )
@@ -498,13 +528,15 @@ ui <- dashboardPage(
       
       ### tabDraw ----
       tabItem(tabName = "tabDraw",
-              HTML(lang$tabDraw$title),
-              HTML(lang$tabDraw$info),
-              fluidRow(style='height:750px',
-                       box(id = "drawBox", title = NULL, width = 12, 
-                           solidHeader = TRUE, height = "750px", 
-                           visNetworkOutput("plotMapDraw", height = "700px")
-                       ),
+              fluidRow(
+                style = "margin-left: 0px;",
+                HTML(lang$tabDraw$title),
+                HTML(lang$tabDraw$info)
+              ),
+              fluidRow(
+                box(id = "drawBox", title = NULL, width = 12, height = "calc(100vh - 290px)", solidHeader = TRUE,
+                    visNetworkOutput("plotMapDraw")
+                ),
               )
       ),
       
@@ -521,11 +553,12 @@ server <- function(input, output, session) {
   # Initialize reactive values (rv) ----
   rv <- reactiveValues(multipleFiles = NULL,                                    # Will be set to FALSE when a single primary file is uploaded, TRUE if multiple files are uploaded
                        comparisonData = NULL,                                   # Will be set to FALSE when no comparison file is uploaded, TRUE if a comparison file is uploaded
-                       
                        initPlotMapDraw = 0,                                     # Counter that is increased to trigger reading the uploaded files
                        startAnalysis = 0,                                       # Counter that is increased to trigger the analysis
+                       dataMatchedAvailable = 0,                                # Counter that is increased to trigger the the next step
                        
-                       dataDraw = NULL,                                         # Data of the drawing
+                       # Data of the drawing
+                       dataDraw = NULL,                                         
                        
                        # Data of the primary file(s)
                        dataRaw1 = NULL,                                         # Raw data
@@ -650,6 +683,13 @@ server <- function(input, output, session) {
         select(id, x, y)
     }
 
+    
+    # Delay centering the plot to ensure it is fully rendered before applying visFit
+    delay(50, {
+      visNetworkProxy("plotMapDraw") %>% 
+        visFit(animation = list(duration = 200, easingFunction = "easeInOutQuad"))
+    })
+    
     rv$dataDraw <- data
     rv$initPlotMapDraw <- rv$initPlotMapDraw + 1
   })
@@ -685,7 +725,7 @@ server <- function(input, output, session) {
       }
       
       # Create plot
-      networkPlot(nodes = rv$dataDraw$nodes, edges = rv$dataDraw$edges, layout = input$layoutDraw, manipulation = TRUE, randomSeed = input$randomSeedDraw)
+      networkPlot(nodes = rv$dataDraw$nodes, edges = rv$dataDraw$edges, layout = input$layoutDraw, manipulation = TRUE, randomSeed = input$randomSeedDraw, lang = lang)
     },
     error = function(e) {
       showNotification(lang$tabDraw$errorMessage, type = "error")               # Show popup
@@ -694,6 +734,7 @@ server <- function(input, output, session) {
 
   }) %>%
     bindEvent(rv$initPlotMapDraw, input$layoutDraw, input$randomSeedDraw)
+
   
   ## Update dataDraw / plotMapDraw ----
   observeEvent(input$plotMapDraw_graphChange, {
@@ -975,7 +1016,7 @@ server <- function(input, output, session) {
     req(input$sourcePrimary)
     
     if (input$sourcePrimary == "file") {
-      # Disable button if no file1   has been uploaded
+      # Disable button if no file1 has been uploaded
       if (is.null(input$file1)) {
         disable("analyzeButton")
       }
@@ -1004,7 +1045,7 @@ server <- function(input, output, session) {
         rv$posMap1Manual <- rv$posMapDrawManual
       },
       error = function(e) {
-        showNotification(lang$tabAnalyze$errorMessage, type = "error")          # Show popup
+        showNotification(paste0(lang$tabAnalyze$errorMessage, " (1)"), type = "error")          # Show popup
         rv$reset <- rv$reset + 1                                                # Reset app
         req(FALSE)                                                              # Do not continue
       })
@@ -1067,31 +1108,61 @@ server <- function(input, output, session) {
      
      rv$dataMatched1 <- data$data1
      rv$dataMatched2 <- data$data2
+     
+     # Continue with aggregation
+     rv$dataMatchedAvailable <- rv$dataMatchedAvailable + 1
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (2)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
   })
-
   
   ## Set dataAgg ----
-  observeEvent(c(rv$dataMatched1), { 
+  observeEvent(c(rv$dataMatchedAvailable), { 
+    req(rv$dataMatchedAvailable != 0)
     req(rv$dataMatched1)       
   
     tryCatch({
-      rv$dataAgg1 <- rv$dataMatched1 %>%
+      data <- rv$dataMatched1 %>%
         prepareDataAgg() %>%
         restructureAndFillData()
+      
+      # Update id's in dataMatched1
+      rv$dataMatched1$nodes <- rv$dataMatched1$nodes %>%
+        mutate(id = data$nodes[match(label, data$nodes$label), "id"])
+      
+      rv$dataMatched1$edges <- rv$dataMatched1$edges %>%
+        mutate(id = data$edges[match(paste0(fromLabel, label, toLabel, arrowheads), 
+                                     paste0(data$edges$fromLabel, data$edges$label, data$edges$toLabel, data$edges$arrowheads)), 
+                               "id"],
+               from = data$nodes[match(fromLabel, data$nodes$label), "id"],
+               to = data$nodes[match(toLabel, data$nodes$label), "id"])
+      
+      rv$dataAgg1 <- data
+      
       if (rv$comparisonData) {
-        rv$dataAgg2 <- rv$dataMatched2 %>%
+        data <- rv$dataMatched2 %>%
           prepareDataAgg() %>%
           restructureAndFillData()
+        
+        # Update id's in dataMatched2
+        rv$dataMatched2$nodes <- rv$dataMatched2$nodes %>%
+          mutate(id = data$nodes[match(label, data$nodes$label), "id"])
+        
+        rv$dataMatched2$edges <- rv$dataMatched2$edges %>%
+          mutate(id = data$edges[match(paste0(fromLabel, label, toLabel, arrowheads), 
+                                       paste0(data$edges$fromLabel, data$edges$label, data$edges$toLabel, data$edges$arrowheads)), 
+                                 "id"],
+                 from = data$nodes[match(fromLabel, data$nodes$label), "id"],
+                 to = data$nodes[match(toLabel, data$nodes$label), "id"])
+        
+        rv$dataAgg2 <- data
       }
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (3)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1133,7 +1204,7 @@ server <- function(input, output, session) {
       }
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (4)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1173,7 +1244,7 @@ server <- function(input, output, session) {
       rv$dataAggSel1 <- data
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (5"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1190,7 +1261,7 @@ server <- function(input, output, session) {
       }
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (6)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1236,7 +1307,7 @@ server <- function(input, output, session) {
       }
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (7)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1262,7 +1333,7 @@ server <- function(input, output, session) {
       }
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (8)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1286,10 +1357,10 @@ server <- function(input, output, session) {
       
       # Plot
       networkPlot(nodes = data$nodes, edges = data$edges, 
-                  layout = input$layoutAnalyze, randomSeed = input$randomSeedAnalyze)
+                  layout = input$layoutAnalyze, randomSeed = input$randomSeedAnalyze, lang = lang)
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (9)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1315,10 +1386,10 @@ server <- function(input, output, session) {
       
       # Plot
       networkPlot(nodes = data$nodes, edges = data$edges, 
-                  layout = input$layoutAnalyze, randomSeed = input$randomSeedAnalyze)
+                  layout = input$layoutAnalyze, randomSeed = input$randomSeedAnalyze, lang = lang)
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (10)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1355,7 +1426,7 @@ server <- function(input, output, session) {
       rv$dataMapSel1 <- data                                                    # Stored for easier export
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (11)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1391,7 +1462,7 @@ server <- function(input, output, session) {
      rv$dataMapSel2 <- data                                                     # Stored for easier export
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (12)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1407,7 +1478,7 @@ server <- function(input, output, session) {
         visGetPositions()
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (13)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1427,7 +1498,7 @@ server <- function(input, output, session) {
       }
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (14)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1442,7 +1513,7 @@ server <- function(input, output, session) {
         visGetPositions()
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (15)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1462,7 +1533,7 @@ server <- function(input, output, session) {
       }
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (16)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1540,7 +1611,7 @@ server <- function(input, output, session) {
       )
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (17)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1561,7 +1632,7 @@ server <- function(input, output, session) {
       tblCentrality$reactable
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (18)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1581,7 +1652,7 @@ server <- function(input, output, session) {
       tblFile$reactable
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (19)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1598,7 +1669,7 @@ server <- function(input, output, session) {
       tblNode$reactable
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (20)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1615,7 +1686,7 @@ server <- function(input, output, session) {
       tblEdge$reactable
     },
     error = function(e) {
-      showNotification(lang$tabAnalyze$errorMessage, type = "error")            # Show popup
+      showNotification(paste0(lang$tabAnalyze$errorMessage, " (21)"), type = "error")            # Show popup
       rv$reset <- rv$reset + 1                                                  # Reset app
       req(FALSE)                                                                # Do not continue
     })
@@ -1789,7 +1860,7 @@ server <- function(input, output, session) {
   
   ## Reset ----
   observeEvent(rv$reset, {
-    req(rv$reset!=0)
+    req(rv$reset != 0)
     
     # Reset Reactive Values
     rv$multipleFiles = NULL
@@ -1797,6 +1868,7 @@ server <- function(input, output, session) {
     
     rv$initPlotMapDraw = 0
     rv$startAnalysis = 0
+    rv$dataMatchedAvailable = 0
     
     rv$dataRaw1 = NULL
     rv$dataMatched1 = NULL

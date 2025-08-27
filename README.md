@@ -54,10 +54,10 @@ To get the app, you can:
 
   ```bash
   # Run this in a system or Docker CLI
-  git clone https://github.com/DeSciL/ConceptMappR.git
+  git clone https://github.com/brunoruetsche/ConceptMappR.git
   ```
   
-- **Download as a ZIP file**: Download the app as a [ZIP file](https://github.com/DeSciL/ConceptMappR/archive/refs/heads/master.zip) and extract it to your desired directory.
+- **Download as a ZIP file**: Download the app as a [ZIP file](https://github.com/brunoruetsche/ConceptMappR/archive/refs/heads/master.zip) and extract it to your desired directory.
 
 ### Option 1: Manual
 

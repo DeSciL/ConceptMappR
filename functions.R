@@ -85,7 +85,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   hide("fileDraw_progress")                                                     # Hide progress bar
   addTooltip(session, "divFileDraw", 
              title = lang$sidebar$upload$fileDraw$tooltip, 
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   
   # divSourcePrimary ----
   choices <- list(A = "file", B = "drawing")
@@ -107,7 +107,11 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divSourcePrimary", 
              title = lang$sidebar$sourcePrimary$tooltip, 
-             options = list(delay = list(show=1000)))
+             placement = "right",             
+             trigger = "focus",
+             options = list(container = "body",
+                            delay = list(show = 2000, hide = 100)))
+  
   
   # divFile1 ----
   insertUI(
@@ -127,7 +131,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   hide("file1_progress")                                                        # Hide progress bar
   addTooltip(session, "divFile1", 
              title = lang$sidebar$upload$filePrimary$tooltip, 
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   
   # divFile2 ----
   insertUI(
@@ -147,7 +151,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   hide("file2_progress")                                                        # Hide progress bar
   addTooltip(session, "divFile2", 
              title = lang$sidebar$upload$filePrimary$tooltip, 
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   
   # divAnalyzeFiles ----
   insertUI(
@@ -164,7 +168,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "analyzeButton", 
              title = lang$sidebar$upload$analyzeFiles$tooltip, 
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   disable("analyzeButton")                                                 # Disable button
   
   # divTitleDisplayOptions ----
@@ -200,7 +204,10 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divCentralityMeasure", 
              title = lang$sidebar$displayOptions$centrality$tooltip, 
-             options = list(delay = list(show=1000)))
+             placement = "right",             
+             trigger = "focus",
+             options = list(container = "body",
+                            delay = list(show = 2000, hide = 100)))
 
   
   # divCheckEdgeLabels ----
@@ -223,7 +230,10 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divCheckEdgeLabels", 
              title = lang$sidebar$displayOptions$checkEdgeLabels$tooltip, 
-             options = list(delay = list(show=1000)))
+             placement = "right",             
+             trigger = "focus",
+             options = list(container = "body",
+                            delay = list(show = 2000, hide = 100)))
 
   # divCheckEdgeDirection ----
   choices <- list(A = "yes", B = "no")
@@ -245,7 +255,10 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divCheckEdgeDirection", 
              title = lang$sidebar$displayOptions$checkEdgeDirection$tooltip, 
-             options = list(delay = list(show=1000)))
+             placement = "right",             
+             trigger = "focus",
+             options = list(container = "body",
+                            delay = list(show = 2000, hide = 100)))
   
   # divLayoutDraw ----
   choices <- list(A = "forceAtlas2Based", B = "layout_nicely", C = "layout_in_circle", D = "manual")
@@ -269,7 +282,10 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divLayoutDraw", 
              title = lang$sidebar$displayOptions$layout$tooltip, 
-             options = list(delay = list(show=1000)))
+             placement = "right",             
+             trigger = "focus",
+             options = list(container = "body",
+                            delay = list(show = 2000, hide = 100)))
   
   # divLayoutAnalyze----
   insertUI(
@@ -288,7 +304,10 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divLayoutAnalyze", 
              title = lang$sidebar$displayOptions$layout$tooltip, 
-             options = list(delay = list(show=1000)))
+             placement = "right",             
+             trigger = "focus",
+             options = list(container = "body",
+                            delay = list(show = 2000, hide = 100)))
   
   # divRandomSeedDraw ----
   insertUI(
@@ -305,7 +324,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "randomSeedDraw", 
              title = lang$sidebar$displayOptions$randomSeed$tooltip, 
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   
   # divRandomSeedAnalyze ----
   insertUI(
@@ -322,7 +341,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divRandomSeedAnalyze", 
              title = lang$sidebar$displayOptions$randomSeed$tooltip, 
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   
   # divSliderSelectEdges ----
   insertUI(
@@ -340,7 +359,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divSliderSelectEdges", 
              title = lang$sidebar$displayOptions$sliderSelectEdges$tooltip,
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   
   # divTitleMatchingOptions ----
   insertUI(
@@ -375,7 +394,10 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divMatchingType", 
              title = lang$sidebar$matchingOptions$matchingType$tooltip, 
-             options = list(delay = list(show=1000)))
+             placement = "right",             
+             trigger = "focus",
+             options = list(container = "body",
+                            delay = list(show = 2000, hide = 100)))
   
   # divNodesOrEdges ----
   choices <- list(A = "nodes", B = "edges")
@@ -395,7 +417,10 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divNodesOrEdges", 
              title = lang$sidebar$matchingOptions$nodesOrEdges$tooltip, 
-             options = list(delay = list(show=1000)))
+             placement = "right",             
+             trigger = "focus",
+             options = list(container = "body",
+                            delay = list(show = 2000, hide = 100)))
   
   # divMatchDistance ----
   insertUI(
@@ -412,7 +437,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divMatchDistance", 
              title = lang$sidebar$matchingOptions$matchDistance$tooltip, 
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   
   # divTitleDownload ----
   insertUI(
@@ -446,7 +471,10 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divDownloadListDraw",
              title = lang$download$list$tooltip,
-             options = list(delay = list(show=1000)))
+             placement = "right",             
+             trigger = "focus",
+             options = list(container = "body",
+                            delay = list(show = 2000, hide = 100)))
   
   # divDownloadButtonDraw ----
   insertUI(
@@ -463,7 +491,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divDownloadButtonDraw",
              title = lang$download$button$tooltip,
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   
   # divDownloadListAnalyze ----
   choices <- list(A = "cxl", B = "xlsxEdgeList", C = "xlsxAnalyses", D = "png", E = "svg")
@@ -486,7 +514,10 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divDownloadListAnalyze",
              title = lang$download$list$tooltip,
-             options = list(delay = list(show=1000)))
+             placement = "right",             
+             trigger = "focus",
+             options = list(container = "body",
+                            delay = list(show = 2000, hide = 100)))
   
   # divDownloadButtonAnalyze ----
   insertUI(
@@ -503,7 +534,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divDownloadButtonAnalyze",
              title = lang$download$button$tooltip,
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   
   
   # divTitleChangeData----
@@ -532,7 +563,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "divChangeData", 
              title = lang$sidebar$changeData$tooltip, 
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   
   
   # divTitleResetDraw ----
@@ -562,7 +593,7 @@ insertSidebarUI <- function(session = NULL, lang = NULL) {
   )
   addTooltip(session, "resetButtonDraw", 
              title = lang$sidebar$resetDrawing$tooltip, 
-             options = list(delay = list(show=1000)))
+             options = list(delay = list(show = 2000)))
   
   # divTextNoData ----
   insertUI(
@@ -714,36 +745,43 @@ visibilitySidebarUI <- function(input = NULL, rv = NULL) {
 insertBodyUI <- function(rv = NULL, lang = NULL) {
   # Build primary map box with centrality and edge sliders
   boxMap1 <- box(id = "boxMap1",
-                 title = lang$tabAnalyze$primaryMap, 
-                 height = "750px", width = 6, solidHeader = TRUE,
-                 hidden(
-                   div(id = "divSliderCentrality1", 
-                       style="display:inline-block; width: 48%",
-                       sliderTextInput("sliderCentrality1", 
-                                       label = lang$tabAnalyze$sliderCentrality$title,
-                                       choices = 0:10, 
-                                       selected = c(0, 10), 
-                                       width = "90%"))
+                 title = lang$tabAnalyze$primaryMap,
+                 width = 6, style='height: calc(100vh - 460px); min-height:750px', solidHeader = TRUE,
+                 div(
+                   style = "display: flex; justify-content: space-between; align-items: center;",  # Flexbox for horizontal alignment
+                   hidden(
+                     div(id = "divSliderCentrality1", 
+                         style = "width: 48%;",
+                         sliderTextInput("sliderCentrality1", 
+                                         label = lang$tabAnalyze$sliderCentrality$title,
+                                         choices = 0:10, 
+                                         selected = c(0, 10), 
+                                         width = "100%"
+                                         )
+                         )
+                   ),
+                   hidden(
+                     div(id = "divSliderEdges1", 
+                         style = "width: 48%;",
+                         sliderTextInput("sliderEdges1", 
+                                         label = lang$tabAnalyze$sliderEdge$title,
+                                         choices = 0:10, 
+                                         selected = c(0, 10), 
+                                         width = "100%"
+                                         )
+                         )
+                   ),
                  ),
-                 hidden(
-                   div(id = "divSliderEdges1", 
-                       style="display:inline-block; width: 48%",
-                       sliderTextInput("sliderEdges1", 
-                                       label = lang$tabAnalyze$sliderEdge$title,
-                                       choices = 0:10, 
-                                       selected = c(0, 10), 
-                                       width = "90%"))
-                 ),
-                 visNetworkOutput("plotMap1", height = "580px")
+                 visNetworkOutput("plotMap1")
   )
   
   # Build comparison map box with centrality and edge sliders
   boxMap2 <- box(id = "boxMap2",
                  title = lang$tabAnalyze$comparisonMap, 
-                 height = "750px", width = 6, solidHeader = TRUE,
+                 width = 6, style='height: calc(100vh - 460px); min-height:750px', solidHeader = TRUE,
                  hidden(
                    div(id = "divSliderCentrality2", 
-                       style="display:inline-block; width: 48%",
+                       style="display:inline-block; width: 46%",
                        sliderTextInput("sliderCentrality2", 
                                        label = lang$tabAnalyze$sliderCentrality$title,
                                        choices = 1:10, 
@@ -752,24 +790,25 @@ insertBodyUI <- function(rv = NULL, lang = NULL) {
                  ),
                  hidden(
                    div(id = "divSliderEdges2", 
-                       style="display:inline-block; width: 48%",
+                       style="display:inline-block; width: 46%",
                        sliderTextInput("sliderEdges2", 
                                        label = lang$tabAnalyze$sliderEdge$title,
                                        choices = 1:10, 
                                        selected = c(1, 10), 
                                        width = "90%"))
                  ),
-                 visNetworkOutput("plotMap2", height = "580px")
+                 visNetworkOutput("plotMap2")
   )
   
   # Build box containing the centrality table
-  boxCentrality <- box(title = lang$tabAnalyze$tblCentrality$title, 
-                       height = "750px", width = NULL, solidHeader = TRUE,
+  boxCentrality <- box(id = "boxCentrality",
+                       title = lang$tabAnalyze$tblCentrality$title, 
+                       width = NULL, style='height: calc(100vh - 460px); min-height:750px', solidHeader = TRUE,
                        reactableOutput("tblCentrality")
   )
   
   # Build box with tabs without centrality table
-  box3Tabs <- tabBox(height = "750px",
+  box3Tabs <- tabBox(
                      width = 12,
                      tabPanel(lang$tabAnalyze$tblFile$title,
                               reactableOutput("tblFile")
@@ -783,7 +822,7 @@ insertBodyUI <- function(rv = NULL, lang = NULL) {
   )
   
   # Build box with tabs with centrality table
-  box4Tabs <- tabBox(height = "750px",
+  box4Tabs <- tabBox(
                      width = 12,
                      tabPanel(lang$tabAnalyze$tblCentrality$title, 
                               reactableOutput("tblCentrality")
@@ -802,7 +841,7 @@ insertBodyUI <- function(rv = NULL, lang = NULL) {
   # Combine boxes depending on whether multiple files and/or comparison data 
   # were uploaded.
   if ((rv$multipleFiles == FALSE) & (rv$comparisonData == FALSE)) {
-    ui <- fluidRow(id = "row1", style='height:750px',
+    ui <- fluidRow(id = "row1",
                    boxMap1,
                    column(width = 6,
                           boxCentrality
@@ -810,10 +849,10 @@ insertBodyUI <- function(rv = NULL, lang = NULL) {
     )
   } else if ((rv$multipleFiles == FALSE) & (rv$comparisonData == TRUE)) {
     ui <- tagList(
-      fluidRow(id = "row1", style='height:750px',
+      fluidRow(id = "row1", 
                boxMap1,
                boxMap2),
-      fluidRow(id = "row2", style='height:750px',
+      fluidRow(id = "row2",
                column(width = 12,
                       boxCentrality
                )
@@ -821,22 +860,22 @@ insertBodyUI <- function(rv = NULL, lang = NULL) {
     )
   } else if ((rv$multipleFiles == TRUE) & (rv$comparisonData == FALSE)) {
     ui <- tagList(
-      fluidRow(id = "row1", style='height:750px',
+      fluidRow(id = "row1",
                boxMap1,
                column(width = 6,
                       boxCentrality
                )
       ),
-      fluidRow(id = "row2", style='height:750px',
+      fluidRow(id = "row2",
                box3Tabs
       )
     )
   } else if ((rv$multipleFiles == TRUE) & (rv$comparisonData == TRUE)) {
     ui <- tagList(
-      fluidRow(id = "row1", style='height:750px',
+      fluidRow(id = "row1",
                boxMap1,
                boxMap2),
-      fluidRow(id = "row2", style='height:750px',
+      fluidRow(id = "row2",
                box4Tabs
       )
     )
@@ -2000,6 +2039,7 @@ prepareDataMap <- function(data1 = NULL,
                           "<br>Thickness: ", n),
            font.color = ifelse(isUnique == "yes", "orange", "grey"),                   # Unique edges are orange
            color.color = ifelse(isUnique == "yes", "orange", "grey"),                  # Unique edges are orange
+           color.highlight = ifelse(isUnique == "yes", "orange", "grey"),              # Unique edges are orange
            dashes = ifelse(isUnique == "yes", TRUE, FALSE),                            # Unique edges are dashed
            width = rescale(n, 1, 5)                                                    # Scale edge thickness
     ) %>%
@@ -2038,7 +2078,8 @@ prepareDataMapSel <- function(data = NULL, sliderCentrality = NULL, sliderEdges 
            color.background = ifelse(id %in% keep, color.background, 'rgba(0,0,0,0)'),
            color.border = ifelse(id %in% keep, color.border, 'rgba(0,0,0,0)'),
            color.highlight.background = ifelse(id %in% keep, color.highlight.background, 'rgba(0,0,0,0)'),
-           color.highlight.border = ifelse(id %in% keep, color.highlight.border, 'rgba(0,0,0,0)'))
+           color.highlight.border = ifelse(id %in% keep, color.highlight.border, 'rgba(0,0,0,0)')
+           )
   
   # Hide edges of hidden nodes
   data$edges <- data$edges %>%
@@ -2050,7 +2091,11 @@ prepareDataMapSel <- function(data = NULL, sliderCentrality = NULL, sliderEdges 
                                'rgba(0,0,0,0)'),
            color.color = ifelse(((from %in% keep) & (to %in% keep)),
                                 color.color, 
-                                'rgba(0,0,0,0)'))
+                                'rgba(0,0,0,0)'),
+           color.highlight = ifelse(((from %in% keep) & (to %in% keep)),
+                                    color.highlight, 
+                                    'rgba(0,0,0,0)')
+           )
   
   # --- Update edge attributes based on filtered edges defined by sliderEdges ---
   # Filter edges based on the number of occurences across files (edge thickness)
@@ -2061,7 +2106,9 @@ prepareDataMapSel <- function(data = NULL, sliderCentrality = NULL, sliderEdges 
   # Hide edges outside the selected range
   data$edges <- data$edges %>%
     mutate(font.color = ifelse(id %in% keep, font.color, 'rgba(0,0,0,0)'),
-           color.color = ifelse(id %in% keep, color.color, 'rgba(0,0,0,0)')) 
+           color.color = ifelse(id %in% keep, color.color, 'rgba(0,0,0,0)'),
+           color.highlight = ifelse(id %in% keep, color.highlight, 'rgba(0,0,0,0)')
+           ) 
   
   # Return the modified data with hidden nodes and edges
   return(data) 
@@ -2682,16 +2729,13 @@ writeXlsxEdgeList <- function(nodes = NULL, edges = NULL, file = NULL) {
 #' @return visNetwork plot object. A network plot with specified settings.
 #'
 #' @export
-networkPlot <- function(nodes = NULL, edges = NULL, layout = NULL, manipulation = FALSE, randomSeed = 42) {
+networkPlot <- function(nodes = NULL, edges = NULL, layout = NULL, manipulation = FALSE, randomSeed = 42, lang = NULL) {
   # General setup for visNetwork plot
-  visNetwork(nodes = nodes %>% 
-               select(-id), edges = edges %>% select(-id))
-  
   p <- visNetwork(nodes = nodes, edges = edges) %>%
     visEdges(arrows = list(to = list(scaleFactor = 0.5),
                            from = list(scaleFactor = 0.5)),
              selectionWidth = 1) %>%
-    visInteraction(tooltipDelay = 200, zoomSpeed = 0.5, navigationButtons = FALSE) 
+    visInteraction(tooltipDelay = 200, zoomSpeed = 0.5, navigationButtons = FALSE, multiselect = TRUE)
   
   # General setup for visNetwork plot
   if (layout == "forceAtlas2Based") {
@@ -3048,7 +3092,6 @@ bartable <- function(data = NULL, barCols = NULL, hideCols = NULL, uniqueCol = N
             resizable = TRUE,
             pagination = TRUE,
             defaultPageSize = 50,
-            height = "660px",
             columnGroups = columnGroups
   )
 }

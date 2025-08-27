@@ -397,6 +397,7 @@
         "info": "<ul>
                 	<li><strong>Please download the drawing regularly</strong> in case of unexpected crashes (e.g., connection dropouts). 
                 	     It is recommended to use the <strong>map structure (i.e. *.cxl file)</strong> which when reuploaded recreates the drawing including the formatting and positions.</li>
+                	<li><strong>Select multiple</strong> nodes or edges by long-clicking or using Ctrl / Cmd + click.</li>
                 	<li><strong>Shortcuts</strong>: <i>'N'</i> to add nodes, <i>'E'</i> to add edges, <i>'double click'</i> on nodes / edges to edit, <i>'D'</i> to delete</li>
                  </ul>",
         "errorMessage": "There was a problem processing the data."
