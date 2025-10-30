@@ -1113,128 +1113,161 @@ readCXL <- function(file) {
     
     # Determine if the source is a node or a label
     edges1 <- edges1 %>%
-      mutate(start = ifelse(idFrom %in% concepts$id, "node", "label"))
-    
-    # Dataframe where the source is a node
+      mutate(start = ifelse(idFrom %in% concepts$id, "node", "label"),
+             end = ifelse(idTo %in% concepts$id, "node", "label"))
+
+    # Dataframe where the source is a node and the target is a label
     edges2 <- edges1 %>%
-      filter(start == "node") %>%
+      filter(start == "node", end == "label") %>%
       select(idFrom, idLink = idTo, everything())
     
-    # Dataframe where the source is a label (i.e., the target is a node)
+    # Dataframe where the source is a label and the target is a node
     edges3 <- edges1 %>%
-      filter(start == "label")%>%
+      filter(start == "label", end == "node") %>%
       select(idLink = idFrom, idTo, everything())
     
-    # Match the dataframes (one having the node as source, one having the node 
-    # as target) by the shared label
-    edges4 <- edges2 %>%
-      full_join(edges3, multiple = "all", by = "idLink") 
-    
-    # Deal with a special case
-    # In CmapTools, it is possible to have a connection such as 
-    # "A <- Label -> B" where the source is always the link. These now appear as 
-    # two rows with NA in idFrom. The following code combines these two rows 
-    # into one.
-    edges5 <- edges4 %>%     
-      filter(is.na(idFrom)) %>%
-      group_by(idLink) %>%
-      mutate(
-        # Move values within the first row (e.g. idTo -> idFrom, arrowhead.y -> arrowhead.x)
-        idFrom = ifelse(is.na(idFrom) & (row_number() == 1), idTo, idFrom),
-        arrowhead.x = ifelse(row_number() == 1, arrowhead.y, arrowhead.x),
-        
-        # Both isBidrectional.x and *.x are "true"
-        isBidrectional.x = ifelse(row_number() == 1, "true", isBidrectional.x),
-        isBidrectional.y = ifelse(row_number() == 1, "true", isBidrectional.y),
-        
-        # Move values from the second to the first row
-        idTo = ifelse((row_number() == 1), lead(idTo), idTo),
-        arrowhead.y = ifelse(row_number() == 1, lead(arrowhead.y), arrowhead.y)
-      ) %>%
-      filter(!is.na(idFrom))
-    
-    # Join
-    if (nrow(edges5) == 0) {
-      edges6 <- edges4
+    if (nrow(edges2) > 0) {
+  
+      # Match the dataframes (one having the node as source, one having the node 
+      # as target) by the shared label
+      edges4 <- edges2 %>%
+        full_join(edges3, multiple = "all", by = "idLink")
+      
+      # Deal with a special case
+      # In CmapTools, it is possible to have a connection such as 
+      # "A <- Label -> B" where the source is always the link. These now appear as 
+      # two rows with NA in idFrom. The following code combines these two rows 
+      # into one.
+      edges5 <- edges4 %>%     
+        filter(is.na(idFrom)) %>%
+        group_by(idLink) %>%
+        mutate(
+          # Move values within the first row (e.g. idTo -> idFrom, arrowhead.y -> arrowhead.x)
+          idFrom = ifelse(is.na(idFrom) & (row_number() == 1), idTo, idFrom),
+          arrowhead.x = ifelse(row_number() == 1, arrowhead.y, arrowhead.x),
+          
+          # Both isBidrectional.x and *.x are "true"
+          isBidrectional.x = ifelse(row_number() == 1, "true", isBidrectional.x),
+          isBidrectional.y = ifelse(row_number() == 1, "true", isBidrectional.y),
+          
+          # Move values from the second to the first row
+          idTo = ifelse((row_number() == 1), lead(idTo), idTo),
+          arrowhead.y = ifelse(row_number() == 1, lead(arrowhead.y), arrowhead.y)
+        ) %>%
+        filter(!is.na(idFrom))
+      
+      # Join
+      if (nrow(edges5) == 0) {
+        edges6 <- edges4
+      } else {
+        edges6 <- edges4 %>%     
+          filter(!is.na(idFrom)) %>%
+          bind_rows(edges5)
+      }
+  
+      # In CmapTools, arrow visibility and directionality are separate settings, i.e.,
+      # an arrow can have a direction without a visible arrowhead.
+      # The following code makes decisions about how the map is actually shown in CmapTools 
+      # and deals with the fact that "A - Label - B" is represented as two connections 
+      # in Cmaptools that can have different arrow visibility/directionality, which contrasts 
+      # with how it is represented in R/visNetwork.
+      # All combinations of visibility and directionality: 
+      #   expand.grid(arrowhead.x = c(FALSE, TRUE), arrowhead.y = c(FALSE, TRUE), isBidrectional.x = c(FALSE, TRUE), isBidrectional.y = c(FALSE, TRUE))
+      edges7 <- edges6 %>%
+        mutate(arrowhead.x = if_else(arrowhead.x == "no" | is.na(arrowhead.x), FALSE, TRUE),
+               arrowhead.y = if_else(arrowhead.y == "no" | is.na(arrowhead.y), FALSE, TRUE),
+               isBidrectional.x = if_else(is.na(isBidrectional.x), FALSE, TRUE),
+               isBidrectional.y = if_else(is.na(isBidrectional.y), FALSE, TRUE)
+        ) %>%
+        mutate(arrowheads = NA,
+               arrowheads = if_else((!arrowhead.x & !arrowhead.y & !isBidrectional.x & !isBidrectional.y), # FALSE FALSE FALSE FALSE
+                                    0, arrowheads, missing = arrowheads),
+               arrowheads = if_else((arrowhead.x & !arrowhead.y & !isBidrectional.x & !isBidrectional.y),  # TRUE FALSE FALSE FALSE
+                                    0, arrowheads, missing = arrowheads),
+               arrowheads = if_else((!arrowhead.x & arrowhead.y & !isBidrectional.x & !isBidrectional.y),  # FALSE TRUE FALSE FALSE 
+                                    1, arrowheads, missing = arrowheads),
+               arrowheads = if_else((arrowhead.x & arrowhead.y & !isBidrectional.x & !isBidrectional.y),   # TRUE TRUE FALSE FALSE
+                                    1, arrowheads, missing = arrowheads),
+               arrowheads = if_else((!arrowhead.x & !arrowhead.y & isBidrectional.x & !isBidrectional.y),  # FALSE FALSE TRUE FALSE
+                                    0, arrowheads, missing = arrowheads),
+               arrowheads = if_else((arrowhead.x & !arrowhead.y & isBidrectional.x & !isBidrectional.y),   # TRUE FALSE TRUE FALSE
+                                    0, arrowheads, missing = arrowheads),
+               arrowheads = if_else((!arrowhead.x & arrowhead.y & isBidrectional.x & !isBidrectional.y),   # FALSE TRUE TRUE FALSE
+                                    1, arrowheads, missing = arrowheads),
+               arrowheads = if_else((arrowhead.x & arrowhead.y & isBidrectional.x & !isBidrectional.y),    # TRUE TRUE TRUE FALSE
+                                    1, arrowheads, missing = arrowheads),
+               arrowheads = if_else((!arrowhead.x & !arrowhead.y & !isBidrectional.x & isBidrectional.y),  # FALSE FALSE FALSE TRUE
+                                    0, arrowheads, missing = arrowheads),
+               arrowheads = if_else((arrowhead.x & !arrowhead.y & !isBidrectional.x & isBidrectional.y),   # TRUE FALSE FALSE TRUE
+                                    0, arrowheads, missing = arrowheads),
+               arrowheads = if_else((!arrowhead.x & arrowhead.y & !isBidrectional.x & isBidrectional.y),   # FALSE TRUE FALSE TRUE
+                                    1, arrowheads, missing = arrowheads),
+               arrowheads = if_else((arrowhead.x & arrowhead.y & !isBidrectional.x & isBidrectional.y),    # TRUE TRUE FALSE TRUE
+                                    1, arrowheads, missing = arrowheads),
+               arrowheads = if_else((!arrowhead.x & !arrowhead.y & isBidrectional.x & isBidrectional.y),   # FALSE FALSE TRUE TRUE
+                                    0, arrowheads, missing = arrowheads),
+               arrowheads = if_else((arrowhead.x & !arrowhead.y & isBidrectional.x & isBidrectional.y),    # TRUE FALSE TRUE TRUE
+                                    0, arrowheads, missing = arrowheads),
+               arrowheads = if_else((!arrowhead.x & arrowhead.y & isBidrectional.x & isBidrectional.y),    # FALSE TRUE TRUE TRUE
+                                    1, arrowheads, missing = arrowheads),
+               arrowheads = if_else((arrowhead.x & arrowhead.y & isBidrectional.x & isBidrectional.y),     # TRUE TRUE TRUE TRUE
+                                    2, arrowheads, missing = arrowheads)
+        ) 
+      
+      # Add labels to the edges and clean up
+      edges8 <- edges7 %>%
+        mutate(width = width.x,                                                                            # Select width of first connection
+               width = ifelse(is.na(width), 1, width),
+               color.color = ifelse(is.na(color.color.x), color.color.y, color.color.x)) %>%
+        select(idFrom, idLink, idTo, arrowheads, width, color.color)
     } else {
-      edges6 <- edges4 %>%     
-        filter(!is.na(idFrom)) %>%
-        bind_rows(edges5)
+      edges8 <- data.frame(idFrom = character(),
+                           idLink = character(),
+                           idTo = character(),
+                           arrowheads = numeric(),
+                           width = numeric(),
+                           color.color = character())
     }
     
-    # In CmapTools, arrow visibility and directionality are separate settings, i.e.,
-    # an arrow can have a direction without a visible arrowhead.
-    # The following code makes decisions about how the map is actually shown in CmapTools 
-    # and deals with the fact that "A - Label - B" is represented as two connections 
-    # in Cmaptools that can have different arrow visibility/directionality, which contrasts 
-    # with how it is represented in R/visNetwork.
-    # All combinations of visibility and directionality: 
-    #   expand.grid(arrowhead.x = c(FALSE, TRUE), arrowhead.y = c(FALSE, TRUE), isBidrectional.x = c(FALSE, TRUE), isBidrectional.y = c(FALSE, TRUE))
-    edges7 <- edges6 %>%
-      mutate(arrowhead.x = if_else(arrowhead.x == "no" | is.na(arrowhead.x), FALSE, TRUE),
-             arrowhead.y = if_else(arrowhead.y == "no" | is.na(arrowhead.y), FALSE, TRUE),
-             isBidrectional.x = if_else(is.na(isBidrectional.x), FALSE, TRUE),
-             isBidrectional.y = if_else(is.na(isBidrectional.y), FALSE, TRUE)
-      ) %>%
-      mutate(arrowheads = NA,
-             arrowheads = if_else((!arrowhead.x & !arrowhead.y & !isBidrectional.x & !isBidrectional.y), # FALSE FALSE FALSE FALSE
-                                  0, arrowheads, missing = arrowheads),
-             arrowheads = if_else((arrowhead.x & !arrowhead.y & !isBidrectional.x & !isBidrectional.y),  # TRUE FALSE FALSE FALSE
-                                  0, arrowheads, missing = arrowheads),
-             arrowheads = if_else((!arrowhead.x & arrowhead.y & !isBidrectional.x & !isBidrectional.y),  # FALSE TRUE FALSE FALSE 
-                                  1, arrowheads, missing = arrowheads),
-             arrowheads = if_else((arrowhead.x & arrowhead.y & !isBidrectional.x & !isBidrectional.y),   # TRUE TRUE FALSE FALSE
-                                  1, arrowheads, missing = arrowheads),
-             arrowheads = if_else((!arrowhead.x & !arrowhead.y & isBidrectional.x & !isBidrectional.y),  # FALSE FALSE TRUE FALSE
-                                  0, arrowheads, missing = arrowheads),
-             arrowheads = if_else((arrowhead.x & !arrowhead.y & isBidrectional.x & !isBidrectional.y),   # TRUE FALSE TRUE FALSE
-                                  0, arrowheads, missing = arrowheads),
-             arrowheads = if_else((!arrowhead.x & arrowhead.y & isBidrectional.x & !isBidrectional.y),   # FALSE TRUE TRUE FALSE
-                                  1, arrowheads, missing = arrowheads),
-             arrowheads = if_else((arrowhead.x & arrowhead.y & isBidrectional.x & !isBidrectional.y),    # TRUE TRUE TRUE FALSE
-                                  1, arrowheads, missing = arrowheads),
-             arrowheads = if_else((!arrowhead.x & !arrowhead.y & !isBidrectional.x & isBidrectional.y),  # FALSE FALSE FALSE TRUE
-                                  0, arrowheads, missing = arrowheads),
-             arrowheads = if_else((arrowhead.x & !arrowhead.y & !isBidrectional.x & isBidrectional.y),   # TRUE FALSE FALSE TRUE
-                                  0, arrowheads, missing = arrowheads),
-             arrowheads = if_else((!arrowhead.x & arrowhead.y & !isBidrectional.x & isBidrectional.y),   # FALSE TRUE FALSE TRUE
-                                  1, arrowheads, missing = arrowheads),
-             arrowheads = if_else((arrowhead.x & arrowhead.y & !isBidrectional.x & isBidrectional.y),    # TRUE TRUE FALSE TRUE
-                                  1, arrowheads, missing = arrowheads),
-             arrowheads = if_else((!arrowhead.x & !arrowhead.y & isBidrectional.x & isBidrectional.y),   # FALSE FALSE TRUE TRUE
-                                  0, arrowheads, missing = arrowheads),
-             arrowheads = if_else((arrowhead.x & !arrowhead.y & isBidrectional.x & isBidrectional.y),    # TRUE FALSE TRUE TRUE
-                                  0, arrowheads, missing = arrowheads),
-             arrowheads = if_else((!arrowhead.x & arrowhead.y & isBidrectional.x & isBidrectional.y),    # FALSE TRUE TRUE TRUE
-                                  1, arrowheads, missing = arrowheads),
-             arrowheads = if_else((arrowhead.x & arrowhead.y & isBidrectional.x & isBidrectional.y),     # TRUE TRUE TRUE TRUE
-                                  2, arrowheads, missing = arrowheads)
-      ) 
+    # Dataframe where the source is a node and the target is a node
+    edges9 <- edges1 %>%
+      filter(start == "node", end == "node") %>%
+      mutate(idLink = "") %>%
+      select(idFrom, idLink, idTo, arrowheads = arrowhead, width, color.color)
     
-    # Add labels to the edges and merge with concept data to map node IDs to labels.
-    edges8 <- edges7 %>%
+    if (nrow(edges9) == 0) {
+      edges9 <- data.frame(idFrom = character(),
+                           idLink = character(),
+                           idTo = character(),
+                           arrowheads = numeric(),
+                           width = numeric(),
+                           color.color = character()) 
+    }
+      
+    # Add node and edge labels and clean up
+    edges10 <- edges8 %>%
+      bind_rows(edges9) %>%
       left_join(concepts %>% rename(fromLabel = label), by = c("idFrom" = "id")) %>%
       left_join(phrases, by = c("idLink" = "id")) %>%
-      left_join(concepts %>% rename(toLabel = label), by = c("idTo" = "id")) %>%
-      mutate(width = width.x,                                                                            # Select width of first connection
-             width = ifelse(is.na(width), 1, width),
-             color.color = ifelse(is.na(color.color.x), color.color.y, color.color.x)) %>%               # Select color of one connection
-      select(fromLabel, label, toLabel, arrowheads, width, color.color) %>%
+      left_join(concepts %>% rename(toLabel = label), by = c("idTo" = "id")) %>%               # Select color of one connection
+      select(idFrom, idLink, idTo, fromLabel, label, toLabel, arrowheads, width, color.color) %>%
       arrange(fromLabel, toLabel)
+      
   } else {
-    edges7 <- data.frame(idFrom = character(),
-                         idTo = character())
-    edges8 <- data.frame(fromLabel = character(),
-                         label = character(),
-                         toLabel = character(),
-                         arrowheads = numeric(),
-                         width = numeric(),
-                         color.color = character())
+    edges10 <- data.frame(idFrom = character(),
+                          idLink = character(),
+                          idTo = character(),
+                          fromLabel = character(),
+                          label = character(),
+                          toLabel = character(),
+                          arrowheads = numeric(),
+                          width = numeric(),
+                          color.color = character())
   }
   
   # --- Restructure nodes ---
   # Extract unique nodes from the edges and merge with appearance data
-  nodes <- edges7 %>%
+  nodes <- edges10 %>%
     select(idFrom, idTo) %>%
     pivot_longer(everything(), names_to = NULL, values_to = "id") %>%
     drop_na() %>%
@@ -1243,9 +1276,13 @@ readCXL <- function(file) {
     left_join(conceptAppearance) %>%
     select(label, x, y, size, color.background)
   
+  # --- Restructure edges ---
+  edges <- edges10 %>%
+    select(fromLabel, label, toLabel, arrowheads, width, color.color)
+  
   # --- Return the final dataframes ---
   # Return a list containing the processed nodes and edges dataframes
-  return(list(nodes = nodes, edges = edges8))
+  return(list(nodes = nodes, edges = edges))
 }
 
 
@@ -1267,32 +1304,18 @@ writeCXL <- function(nodes = NULL, edges = NULL, file = NULL) {
   doc <- xml_new_document()
   root <- xml_add_child(doc, "cmap")
   map <- xml_add_child(root, "map")
-  
-  # Add child nodes
-  if (nrow(nodes) > 0) {
-    concept_list_node <- xml_add_child(map, "concept-list")
-    concept_appearance_list_node <- xml_add_child(map, "concept-appearance-list")
-  }
-  if (nrow(edges) > 0) {
-    linking_phrase_list_node <- xml_add_child(map, "linking-phrase-list")
-    connection_list_node <- xml_add_child(map, "connection-list")
-    linking_phrase_appearance_list_node <- xml_add_child(map, "linking-phrase-appearance-list")
-    connection_appearance_list_node <- xml_add_child(map, "connection-appearance-list")
-  }
 
   # Prepare nodes
   if (nrow(nodes) > 0) {
-    colors <- nodes$color.background %>%
-      str_replace(fixed("rgba(0,0,0,0)"), "#97c2fc") %>%                        # Hidden elements are shown in default color
-      col2rgb() %>%
-      t() %>%
-      as.data.frame() %>% 
-      mutate(color.background = paste0(red, ",", green, ",", blue, ",255"))
     nodes <- nodes %>%
       mutate(x = x - min(nodes$x) + 250,
              y = y - min(nodes$y) + 250,
-             size = rescale(as.integer(size), 25, 50),
-             color.background = colors$color.background)
+             size = rescale(as.integer(size), 25, 50)) %>%
+      rowwise() %>%
+      mutate(color.background = str_replace(color.background, fixed("rgba(0,0,0,0)"), "#97c2fc"),
+             color.background = str_c(str_c(col2rgb(color.background), collapse = ","), ",255")
+             
+      )
   }
   
   # Prepare phrases
@@ -1306,31 +1329,54 @@ writeCXL <- function(nodes = NULL, edges = NULL, file = NULL) {
                   select(id, xTo = x, yTo = y),
                 by = c("to" = "id")) %>%
       mutate(x = as.integer((xFrom + xTo) / 2),
-             y = as.integer((yFrom + yTo) / 2))
+             y = as.integer((yFrom + yTo) / 2)) %>%
+      filter(label != "") # Remove empty labels
   }
   
   # Prepare connections
   if (nrow(edges) > 0) {
-    colors <- edges$color.color %>%
-      str_replace(fixed("rgba(0,0,0,0)"), "#97c2fc") %>%                        # Hidden elements are shown in default color
-      col2rgb() %>%
-      t() %>%
-      as.data.frame() %>% 
-      mutate(color = paste0(red, ",", green, ",", blue, ",255"))
     connections <- edges %>%
-      select(from, to = id, arrowheads, width) %>%
+      # connection from node to edge
+      filter(label != "") %>%
+      select(from, to = id, arrowheads, width, color.color) %>%
       mutate(from2 = from,
              from = if_else(arrowheads == 2, to, from2),
-             to = if_else(arrowheads == 2, from2, to)) %>%                         # Switch source and target for 'from' arrows
+             to = if_else(arrowheads == 2, from2, to)) %>%                      # Switch source and target for 'from' arrows
       select(-from2) %>%
+      # connection from edge to node
       bind_rows(edges %>%
-                  select(from = id, to, arrowheads, width)) %>%
-        mutate(id = 1:n(),
-             arrows = if_else(arrowheads > 0, "if-to-concept", "no", missing = "no"),
-             color = rep(colors$color, 2)) %>%
-        select(id, from, to, everything())
+                  filter(label != "") %>%
+                  select(from = id, to, arrowheads, width, color.color)
+                ) %>%
+      # connection from node to node (no label)
+      bind_rows(edges %>%
+                  filter(label == "") %>%
+                  select(from, to, arrowheads, width, color.color)
+                ) %>%
+      mutate(id = 1:n(),
+             arrows = if_else(arrowheads > 0, "if-to-concept", "no", missing = "no")) %>%
+      rowwise() %>%
+      mutate(color.color = str_replace(color.color, fixed("rgba(0,0,0,0)"), "#97c2fc"),
+             color.color = str_c(str_c(col2rgb(color.color), collapse = ","), ",255")
+             
+      ) %>%
+      select(id, from, to, everything())
   }
 
+  # Add child nodes
+  if (nrow(nodes) > 0) {
+    concept_list_node <- xml_add_child(map, "concept-list")
+    concept_appearance_list_node <- xml_add_child(map, "concept-appearance-list")
+  }
+  if (nrow(phrases) > 0) {
+    linking_phrase_list_node <- xml_add_child(map, "linking-phrase-list")
+    linking_phrase_appearance_list_node <- xml_add_child(map, "linking-phrase-appearance-list")
+  }
+  if (nrow(edges) > 0) {
+    connection_list_node <- xml_add_child(map, "connection-list")
+    connection_appearance_list_node <- xml_add_child(map, "connection-appearance-list")
+  }
+  
   # Add concepts
   if (nrow(nodes) > 0) {
     for (i in 1:nrow(nodes)) {
@@ -1358,7 +1404,7 @@ writeCXL <- function(nodes = NULL, edges = NULL, file = NULL) {
   }
   
   # Add linking phrases
-  if (nrow(edges) > 0) {
+  if (nrow(phrases) > 0) {
     for (i in 1:nrow(phrases)) {
       xml_add_child(linking_phrase_list_node, "linking-phrase", 
                     id = as.character(phrases$id[i]), 
@@ -1377,7 +1423,7 @@ writeCXL <- function(nodes = NULL, edges = NULL, file = NULL) {
   }
 
   # Add linking phrase appearance
-  if (nrow(edges) > 0) {
+  if (nrow(phrases) > 0) {
     for (i in 1:nrow(phrases)) {
       xml_add_child(linking_phrase_appearance_list_node, "linking-phrase-appearance", 
                     id = as.character(phrases$id[i]),
@@ -1394,7 +1440,7 @@ writeCXL <- function(nodes = NULL, edges = NULL, file = NULL) {
                     id = as.character(connections$id[i]), 
                     arrowhead = as.character(connections$arrows[i]),
                     thickness = as.character(connections$width[i]),
-                    color = as.character(connections$color[i])
+                    color = as.character(connections$color.color[i])
       )
     }
   }
@@ -2875,8 +2921,18 @@ saveNetworkPlot <- function(nodes = NULL, edges = NULL, file = NULL) {
   height <- max_y - min_y
   
   # Choose a target size for the Graphviz canvas (in inches)
-  target_width <- 8 
-  target_height <- 8
+  n_nodes <- nodes %>%
+    filter(!color.background == "rgba(0,0,0,0)") %>%
+    nrow()
+  base_side <- 5                                                      
+  target_side <- base_side + n_nodes * 0.25
+  target_width  <- target_side
+  target_height <- target_side
+  
+  # Choose a target font size
+  base_fontsize = 12
+  n_steps <- floor(n_nodes / 20)
+  target_fontsize <- base_fontsize + n_steps * 1
   
   # Calculate the scaling factor to fit the graph within the target size
   scale_factor <- min(target_width / width, target_height / height)
@@ -2907,7 +2963,7 @@ saveNetworkPlot <- function(nodes = NULL, edges = NULL, file = NULL) {
            ),
            height = size,                         
            width = size,
-           fontsize = 12,
+           fontsize = target_fontsize,
            color = color.border,
            fillcolor = color.background,
            shape = ifelse(isUnique == "yes", "square", "circle")
@@ -2936,7 +2992,7 @@ saveNetworkPlot <- function(nodes = NULL, edges = NULL, file = NULL) {
     mutate(across(c(from, to), ~gsub("^[0-9]*|-", "", .)),                      # Remove any numbers at the start and hyphens within the id
            label = replace_na(label, ""),
            label = paste(gsub("\n", "<br/>", label)),
-           fontsize = 10,
+           fontsize = target_fontsize - 2,
            penwidth = width,                                                    # Scale edge thickness
            fontcolor = font.color,                                             
            color = color.color,
@@ -2950,7 +3006,7 @@ saveNetworkPlot <- function(nodes = NULL, edges = NULL, file = NULL) {
     # Create DOT language strings
     mutate(dotString = paste0(from, "--", to, " [", 
                               "label = <", label, ">, ",
-                              "fontsize = ", fontsize, ", ",
+                              "fontsize = ", fontsize - 2, ", ",
                               "penwidth = ", penwidth, ", ",
                               "fontcolor = '", fontcolor, "', ",
                               "color = '", color, "', ",

@@ -793,8 +793,8 @@ server <- function(input, output, session) {
       } else if (graphChange$cmd == "editNode") {
         rv$dataDraw$nodes <- rv$dataDraw$nodes %>%
           mutate(label = ifelse(id == graphChange$id, thisLabel, label),
-                 color.background = ifelse(id == graphChange$id,  graphChange$coloring, color.background),
                  size = ifelse(id == graphChange$id,  thisSize, size),
+                 color.background = ifelse(id == graphChange$id,  graphChange$coloring, color.background),
                  hasChanged = ifelse(id == graphChange$id,  TRUE, FALSE))
         
         rv$dataDraw$edges <- rv$dataDraw$edges %>%
