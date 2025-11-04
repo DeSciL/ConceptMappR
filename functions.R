@@ -1232,8 +1232,16 @@ readCXL <- function(file) {
     # Dataframe where the source is a node and the target is a node
     edges9 <- edges1 %>%
       filter(start == "node", end == "node") %>%
-      mutate(idLink = "") %>%
-      select(idFrom, idLink, idTo, arrowheads = arrowhead, width, color.color)
+      mutate(idLink = "",
+             arrowhead = if_else(arrowhead == "no" | is.na(arrowhead), FALSE, TRUE),
+             isBidrectional = if_else(is.na(isBidrectional), FALSE, TRUE),
+             arrowheads = case_when(!arrowhead & !isBidrectional ~ 0,
+                                    arrowhead & !isBidrectional ~ 1,
+                                    !arrowhead & isBidrectional ~ 0,
+                                    arrowhead & isBidrectional ~ 1,
+                                    .default = NA)
+             ) %>%
+      select(idFrom, idLink, idTo, arrowheads, width, color.color)
     
     if (nrow(edges9) == 0) {
       edges9 <- data.frame(idFrom = character(),

@@ -11,7 +11,6 @@ authors:
   given-names: "Christian Maximilian"
   orcid: "https://orcid.org/0000-0002-5942-3273"
 title: "ConceptMappR"
-version: v1.0.3
 doi: 10.5281/zenodo.14938858
-date-released: 2025-10-30
+date-released: 2025-02-27
 url: "https://github.com/brunoruetsche/ConceptMappR"
