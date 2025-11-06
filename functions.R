@@ -1376,7 +1376,7 @@ writeCXL <- function(nodes = NULL, edges = NULL, file = NULL) {
     concept_list_node <- xml_add_child(map, "concept-list")
     concept_appearance_list_node <- xml_add_child(map, "concept-appearance-list")
   }
-  if (nrow(phrases) > 0) {
+  if (exists("phrases")) {
     linking_phrase_list_node <- xml_add_child(map, "linking-phrase-list")
     linking_phrase_appearance_list_node <- xml_add_child(map, "linking-phrase-appearance-list")
   }
@@ -1412,7 +1412,7 @@ writeCXL <- function(nodes = NULL, edges = NULL, file = NULL) {
   }
   
   # Add linking phrases
-  if (nrow(phrases) > 0) {
+  if (exists("phrases")) {
     for (i in 1:nrow(phrases)) {
       xml_add_child(linking_phrase_list_node, "linking-phrase", 
                     id = as.character(phrases$id[i]), 
@@ -1431,7 +1431,7 @@ writeCXL <- function(nodes = NULL, edges = NULL, file = NULL) {
   }
 
   # Add linking phrase appearance
-  if (nrow(phrases) > 0) {
+  if (exists("phrases")) {
     for (i in 1:nrow(phrases)) {
       xml_add_child(linking_phrase_appearance_list_node, "linking-phrase-appearance", 
                     id = as.character(phrases$id[i]),
