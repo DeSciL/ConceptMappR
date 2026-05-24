@@ -2,56 +2,91 @@ name: Docker CI
 
 on:
   push:
-    tags:     # Pattern matched against refs/tags
-      - '*'   # Push events to every tag not containing /
+    tags: ['*']
 
-  # push:
-  #   branches: [ "main" ]
-  # pull_request:
-  #   branches: [ "main" ]
-  
-  # Allows to run this workflow from the Actions tab
-  # Selet a tag to build a versioned docker release
   workflow_dispatch:
 
 env:
   FOLDER: "."
-  REGISTRY: ${{ secrets.DESCIL_REGISTRY_URL }}
+  GITLAB: ${{ secrets.DESCIL_REGISTRY_URL }}
   ORG: descil
   REPO: datascience
+  HARBOR: ${{ secrets.HARBOR_REGISTRY_URL }}
+  PROJECT: li
   LABEL: conceptmappr
-  NS: li
 
 jobs:
   build:
     runs-on: descil-runners
-    
-    # Steps represent a sequence of tasks that will be executed as part of the job
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-    - name: Get latest tag pushed
-      id: tag
-      uses: 32teeth/action-github-tag@v1.0.7
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          VERSION="${TAG_NAME#v}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
 
-    - name: Return latest tag pushed
-      run: echo ${{steps.tag.outputs.tag}}
-    
-    - name: Login to GitLab
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ secrets.DESCIL_REGISTRY_URL }}
-        username: ${{ secrets.DESCIL_REGISTRY_USER }}
-        password: ${{ secrets.DESCIL_REGISTRY_PASSWORD }}
-        
-    - name: Build the Docker image
-      run: docker build . --file $FOLDER/Dockerfile --tag $REGISTRY/$ORG/$REPO/$LABEL:${{steps.tag.outputs.tag}} --build-arg http_proxy="http://proxy.ethz.ch:3128" --build-arg https_proxy="http://proxy.ethz.ch:3128"
-    
-    - name: Push the Docker image
-      run: docker push $REGISTRY/$ORG/$REPO/$LABEL:${{steps.tag.outputs.tag}}
-    
-    - name: Tag the Docker image
-      run: docker tag $REGISTRY/$ORG/$REPO/$LABEL:${{steps.tag.outputs.tag}} $REGISTRY/$ORG/$REPO/$LABEL:latest
-    
-    - name: Push Docker tag
-      run: docker push $REGISTRY/$ORG/$REPO/$LABEL:latest
+      - name: Build the Docker image
+        run: |
+          docker build . \
+            --file $FOLDER/Dockerfile \
+            --tag local-image:${{steps.version.outputs.tag}} \
+            --build-arg VERSION=${{steps.version.outputs.version}} \
+            --provenance=false \
+            --build-arg http_proxy="http://proxy.ethz.ch:3128" \
+            --build-arg https_proxy="http://proxy.ethz.ch:3128" \
+            --label org.opencontainers.image.source=https://github.com/DeSciL/ConceptMappR \
+            --label org.opencontainers.image.description="ConceptMappR Container" \
+            --label org.opencontainers.image.licenses=MIT
+
+      - name: Login to Harbor
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ secrets.HARBOR_REGISTRY_URL }}
+          username: ${{ secrets.HARBOR_REGISTRY_USER }}
+          password: ${{ secrets.HARBOR_REGISTRY_PASSWORD }}
+
+      - name: Tag and push to Harbor (versioned)
+        run: |
+          docker tag local-image:${{steps.version.outputs.tag}} $HARBOR/$PROJECT/$LABEL:${{steps.version.outputs.tag}}
+          docker push $HARBOR/$PROJECT/$LABEL:${{steps.version.outputs.tag}}
+
+      - name: Tag and push to Harbor (latest)
+        run: |
+          docker tag local-image:${{steps.version.outputs.tag}} $HARBOR/$PROJECT/$LABEL:latest
+          docker push $HARBOR/$PROJECT/$LABEL:latest
+
+      # - name: Sign Harbor images with Cosign
+      #   run: |
+      #     cosign sign --yes $HARBOR/$PROJECT/$LABEL:${{steps.version.outputs.tag}}
+      #     cosign sign --yes $HARBOR/$PROJECT/$LABEL:latest
+
+      - name: Login to GitLab
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ secrets.DESCIL_REGISTRY_URL }}
+          username: ${{ secrets.DESCIL_REGISTRY_USER }}
+          password: ${{ secrets.DESCIL_REGISTRY_PASSWORD }}
+
+      - name: Tag and push to GitLab (versioned)
+        run: |
+          docker tag local-image:${{steps.version.outputs.tag}} $GITLAB/$ORG/$REPO/$LABEL:${{steps.version.outputs.tag}}
+          docker push $GITLAB/$ORG/$REPO/$LABEL:${{steps.version.outputs.tag}}
+
+      - name: Tag and push to GitLab (latest)
+        run: |
+          docker tag local-image:${{steps.version.outputs.tag}} $GITLAB/$ORG/$REPO/$LABEL:latest
+          docker push $GITLAB/$ORG/$REPO/$LABEL:latest
+
+      # - name: Sign GitLab images with Cosign
+      #   run: |
+      #     cosign sign --yes $GITLAB/$ORG/$REPO/$LABEL:${{steps.version.outputs.tag}}
+      #     cosign sign --yes $GITLAB/$ORG/$REPO/$LABEL:latest
