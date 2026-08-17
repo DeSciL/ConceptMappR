@@ -2960,7 +2960,11 @@ saveNetworkPlot <- function(nodes = NULL, edges = NULL, file = NULL) {
            color.border, color.background) %>%                                   
     mutate(id = gsub("^[0-9]*|-", "", id),                                      # Remove any numbers at the start and hyphens within the id
            xlabel = label, 
-           xlabel = paste(gsub("\n", "<br/>", xlabel)),
+           # Escape HTML-special characters BEFORE inserting real <br/> tags
+           xlabel = str_replace_all(xlabel, fixed("&"), "&amp;"),
+           xlabel = str_replace_all(xlabel, fixed("<"), "&lt;"),
+           xlabel = str_replace_all(xlabel, fixed(">"), "&gt;"),
+           xlabel = str_replace_all(xlabel, fixed("\n"), "<br/>"),
            x = (x - min_x) * scale_factor,
            y = (max_y - y) * scale_factor,
            # Scale node sizes from visNetwork range to Graphviz range
@@ -2999,7 +3003,11 @@ saveNetworkPlot <- function(nodes = NULL, edges = NULL, file = NULL) {
            width, arrowheads, color.color, font.color) %>%
     mutate(across(c(from, to), ~gsub("^[0-9]*|-", "", .)),                      # Remove any numbers at the start and hyphens within the id
            label = replace_na(label, ""),
-           label = paste(gsub("\n", "<br/>", label)),
+           # Escape HTML-special characters BEFORE inserting real <br/> tags
+           label = str_replace_all(label, fixed("&"), "&amp;"),
+           label = str_replace_all(label, fixed("<"), "&lt;"),
+           label = str_replace_all(label, fixed(">"), "&gt;"),
+           label = str_replace_all(label, fixed("\n"), "<br/>"),
            fontsize = target_fontsize - 2,
            penwidth = width,                                                    # Scale edge thickness
            fontcolor = font.color,                                             
