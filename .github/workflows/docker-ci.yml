@@ -8,9 +8,6 @@ on:
 
 env:
   FOLDER: "."
-  GITLAB: ${{ secrets.DESCIL_REGISTRY_URL }}
-  ORG: descil
-  REPO: datascience
   HARBOR: ${{ secrets.HARBOR_REGISTRY_URL }}
   PROJECT: li
   LABEL: conceptmappr
@@ -41,11 +38,9 @@ jobs:
             --tag local-image:${{steps.version.outputs.tag}} \
             --build-arg VERSION=${{steps.version.outputs.version}} \
             --provenance=false \
-            --build-arg http_proxy="http://proxy.ethz.ch:3128" \
-            --build-arg https_proxy="http://proxy.ethz.ch:3128" \
             --label org.opencontainers.image.source=https://github.com/DeSciL/ConceptMappR \
             --label org.opencontainers.image.description="ConceptMappR Container" \
-            --label org.opencontainers.image.licenses=MIT
+            --label org.opencontainers.image.licenses=GPL-3.0
 
       - name: Login to Harbor
         uses: docker/login-action@v4
@@ -64,29 +59,7 @@ jobs:
           docker tag local-image:${{steps.version.outputs.tag}} $HARBOR/$PROJECT/$LABEL:latest
           docker push $HARBOR/$PROJECT/$LABEL:latest
 
-      # - name: Sign Harbor images with Cosign
-      #   run: |
-      #     cosign sign --yes $HARBOR/$PROJECT/$LABEL:${{steps.version.outputs.tag}}
-      #     cosign sign --yes $HARBOR/$PROJECT/$LABEL:latest
-
-      - name: Login to GitLab
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ secrets.DESCIL_REGISTRY_URL }}
-          username: ${{ secrets.DESCIL_REGISTRY_USER }}
-          password: ${{ secrets.DESCIL_REGISTRY_PASSWORD }}
-
-      - name: Tag and push to GitLab (versioned)
+      - name: Sign Harbor image with Cosign
         run: |
-          docker tag local-image:${{steps.version.outputs.tag}} $GITLAB/$ORG/$REPO/$LABEL:${{steps.version.outputs.tag}}
-          docker push $GITLAB/$ORG/$REPO/$LABEL:${{steps.version.outputs.tag}}
-
-      - name: Tag and push to GitLab (latest)
-        run: |
-          docker tag local-image:${{steps.version.outputs.tag}} $GITLAB/$ORG/$REPO/$LABEL:latest
-          docker push $GITLAB/$ORG/$REPO/$LABEL:latest
-
-      # - name: Sign GitLab images with Cosign
-      #   run: |
-      #     cosign sign --yes $GITLAB/$ORG/$REPO/$LABEL:${{steps.version.outputs.tag}}
-      #     cosign sign --yes $GITLAB/$ORG/$REPO/$LABEL:latest
+          DIGEST=$(docker buildx imagetools inspect $HARBOR/$PROJECT/$LABEL:${{steps.version.outputs.tag}} --format '{{json .Manifest.Digest}}' | jq -r .)
+          cosign sign --yes $HARBOR/$PROJECT/$LABEL@$DIGEST
